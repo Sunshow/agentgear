@@ -247,6 +247,16 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 		connInfo:           connInfo,
 	}
 
+	// 请求前预检测：基于 token 估算检查是否超过上下文限制
+	if handler := h.shouldPreemptContextError(reqCtx); handler != nil {
+		reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
+		reqCtx.forceLog = true
+		h.updateConnectionStatus(connInfo, "preempt_context_error", reqCtx.meta.DurationMs)
+		h.saveLog(reqCtx)
+		h.writeContextLengthError(c, handler, len(reqBody))
+		return
+	}
+
 	// 去掉 gateway 路径前缀
 	path := c.Request.URL.Path
 	if h.gatewayPath != "" {
@@ -551,6 +561,48 @@ func (h *Handler) shouldTransformEmptyStreamToContextError(reqCtx *requestContex
 
 	// 检查请求大小是否超过阈值
 	if handler.RequestSizeThreshold > 0 && len(reqCtx.reqBody) >= handler.RequestSizeThreshold {
+		return handler
+	}
+
+	return nil
+}
+
+// shouldPreemptContextError 请求前预检测：基于 token 估算检查是否超过上下文限制
+func (h *Handler) shouldPreemptContextError(reqCtx *requestContext) *transformer.TransformerDef {
+	// 跳过压缩请求（避免死循环）
+	if h.isCompressRequest(reqCtx.reqBody) {
+		return nil
+	}
+
+	// 获取错误转换器
+	if h.transformerRegistry == nil {
+		return nil
+	}
+	handler := h.transformerRegistry.GetErrorTransformer(reqCtx.tags)
+	if handler == nil || handler.ContextTokenLimit == 0 {
+		return nil
+	}
+
+	// 设置默认值
+	ratio := handler.TokenEstimateRatio
+	if ratio == 0 {
+		ratio = 3.5
+	}
+	thresholdRatio := handler.ContextThresholdRatio
+	if thresholdRatio == 0 {
+		thresholdRatio = 0.85
+	}
+
+	// 估算 token 数
+	estimatedTokens := float64(len(reqCtx.reqBody)) / ratio
+	threshold := float64(handler.ContextTokenLimit) * thresholdRatio
+
+	if estimatedTokens > threshold {
+		h.logger.Warn("preemptive context limit check triggered",
+			zap.Int("request_size", len(reqCtx.reqBody)),
+			zap.Float64("estimated_tokens", estimatedTokens),
+			zap.Float64("threshold", threshold),
+			zap.String("transformer", handler.Name))
 		return handler
 	}
 

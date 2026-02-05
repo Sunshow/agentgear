@@ -20,9 +20,12 @@ type TransformerDef struct {
 	InjectText   string                 `mapstructure:"inject_text" json:"inject_text,omitempty" yaml:"inject_text,omitempty"`     // 注入的文本内容
 	InjectFormat string                 `mapstructure:"inject_format" json:"inject_format,omitempty" yaml:"inject_format,omitempty"` // "system-reminder" | "plain"
 	// error_transform 类型专用字段
-	ErrorCode            string `mapstructure:"error_code" json:"error_code,omitempty" yaml:"error_code,omitempty"`
-	ErrorMessage         string `mapstructure:"error_message" json:"error_message,omitempty" yaml:"error_message,omitempty"`
-	RequestSizeThreshold int    `mapstructure:"request_size_threshold" json:"request_size_threshold,omitempty" yaml:"request_size_threshold,omitempty"`
+	ErrorCode             string  `mapstructure:"error_code" json:"error_code,omitempty" yaml:"error_code,omitempty"`
+	ErrorMessage          string  `mapstructure:"error_message" json:"error_message,omitempty" yaml:"error_message,omitempty"`
+	RequestSizeThreshold  int     `mapstructure:"request_size_threshold" json:"request_size_threshold,omitempty" yaml:"request_size_threshold,omitempty"`
+	ContextTokenLimit     int     `mapstructure:"context_token_limit" json:"context_token_limit,omitempty" yaml:"context_token_limit,omitempty"`
+	ContextThresholdRatio float64 `mapstructure:"context_threshold_ratio" json:"context_threshold_ratio,omitempty" yaml:"context_threshold_ratio,omitempty"`
+	TokenEstimateRatio    float64 `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
 	Builtin              bool   `mapstructure:"builtin" json:"builtin" yaml:"builtin,omitempty"`
 	IsTemplate   bool                   `mapstructure:"is_template" json:"is_template,omitempty" yaml:"is_template,omitempty"`
 	TemplateRef  string                 `mapstructure:"template_ref" json:"template_ref,omitempty" yaml:"template_ref,omitempty"`

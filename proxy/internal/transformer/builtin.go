@@ -154,14 +154,17 @@ This prevents output truncation with long content.`,
 
 	// === 错误转换类型转换器 ===
 	{
-		Name:                 "$droid_large_request_to_context_error",
-		Description:          "将大请求的错误响应转换为上下文超限错误，触发 Droid 压缩",
-		Direction:            "response",
-		Type:                 "error_transform",
-		ErrorCode:            "context_length_exceeded",
-		ErrorMessage:         "prompt is too long: request size exceeds limit",
-		RequestSizeThreshold: 500000, // 默认 500KB
-		Builtin:              true,
+		Name:                  "$droid_upstream_kiro_force_compress",
+		Description:           "基于 token 估算预检测上下文超限，触发 Droid 压缩",
+		Direction:             "response",
+		Type:                  "error_transform",
+		ErrorCode:             "context_length_exceeded",
+		ErrorMessage:          "prompt is too long: request size exceeds limit",
+		RequestSizeThreshold:  500000, // 响应后兜底检测阈值 500KB
+		ContextTokenLimit:     200000,
+		ContextThresholdRatio: 0.85,
+		TokenEstimateRatio:    3.5,
+		Builtin:               true,
 	},
 }
 
@@ -247,13 +250,13 @@ var BuiltinMappings = []MappingRule{
 		Transformer: "$upstream_kiro_chunked_write_hint",
 		Builtin:     true,
 	},
-	// Droid 大请求错误转换
+	// Droid + Kiro 大请求错误转换
 	{
-		Name:        "$droid_large_request_error",
-		Description: "Droid: 大请求错误响应转换为上下文超限错误",
+		Name:        "$droid_upstream_kiro_force_compress_mapping",
+		Description: "Droid+Kiro: 大请求错误响应转换为上下文超限错误",
 		Enabled:     true,
-		Tags:        []string{"$a_droid"},
-		Transformer: "$droid_large_request_to_context_error",
+		Tags:        []string{"$a_droid", "$u_kiro"},
+		Transformer: "$droid_upstream_kiro_force_compress",
 		Builtin:     true,
 	},
 }
