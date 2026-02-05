@@ -1,0 +1,143 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/sunshow/agentgear/proxy/internal/api"
+	"github.com/sunshow/agentgear/proxy/internal/config"
+	"github.com/sunshow/agentgear/proxy/internal/logger"
+	"github.com/sunshow/agentgear/proxy/internal/memory"
+	"github.com/sunshow/agentgear/proxy/internal/proxy"
+	"github.com/sunshow/agentgear/proxy/internal/tagging"
+	"github.com/sunshow/agentgear/proxy/internal/transformer"
+)
+
+func main() {
+	configPath := flag.String("config", "", "path to config file")
+	flag.Parse()
+
+	// Determine actual config file path
+	actualConfigPath := *configPath
+	if actualConfigPath == "" {
+		actualConfigPath = "./configs/config.yaml"
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+
+	log.Printf("=== Configuration Loaded ===")
+	log.Printf("Server: host=%s, port=%d, api_port=%d", cfg.Server.Host, cfg.Server.Port, cfg.Server.APIPort)
+	log.Printf("Gateways: %d configured", len(cfg.Gateways))
+	for _, gw := range cfg.Gateways {
+		log.Printf("  - %s: path=%s, upstream=%s, enabled=%v", gw.Name, gw.Path, gw.Upstream, gw.Enabled)
+	}
+	log.Printf("Logging: enabled=%v, dir=%s", cfg.Logging.Enabled, cfg.Logging.Dir)
+	log.Printf("Memory: max_connections=%d, retention=%dm", cfg.Memory.MaxConnections, cfg.Memory.RetentionMinutes)
+	log.Printf("Tagging: %d rules", len(cfg.Tagging.Rules))
+	log.Printf("Transformers: %d definitions, %d mappings", len(cfg.Transformers.Definitions), len(cfg.Transformers.Mappings))
+	log.Printf("===========================\n")
+
+	appLogger, err := logger.New(logger.Config{
+		Enabled:    cfg.Logging.Enabled,
+		Dir:        cfg.Logging.Dir,
+		MaxSize:    cfg.Logging.MaxSize,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAge:     cfg.Logging.MaxAge,
+	})
+	if err != nil {
+		log.Fatalf("failed to create logger: %v", err)
+	}
+	defer appLogger.Sync()
+
+	// Initialize config writer for CRUD operations
+	configWriter := config.NewConfigWriter(actualConfigPath, cfg)
+	defer configWriter.Close()
+
+	// Initialize memory store
+	memoryStore := memory.NewConnectionStore(cfg.Memory)
+	defer memoryStore.Close()
+
+	// Initialize tagging engine
+	taggingEngine := tagging.NewEngine(cfg.Tagging)
+
+	// Initialize transformer registry (always initialize for API management)
+	transformerRegistry := transformer.NewRegistry(cfg.Transformers)
+
+	// Initialize WebSocket hub
+	wsHub := api.NewWSHub(appLogger.Logger)
+	go wsHub.Run()
+
+	// Start API server in goroutine
+	if cfg.Server.APIPort > 0 {
+		apiServer := api.NewServer(api.Config{
+			Host:         cfg.Server.APIHost,
+			Port:         cfg.Server.APIPort,
+			Store:        memoryStore,
+			Tagging:      taggingEngine,
+			Transformer:  transformerRegistry,
+			ConfigWriter: configWriter,
+			Logger:       appLogger.Logger,
+		})
+		apiServer.SetWSHub(wsHub)
+
+		go func() {
+			if err := apiServer.Run(); err != nil {
+				appLogger.Sugar().Errorf("API server error: %v", err)
+			}
+		}()
+		appLogger.Sugar().Infof("API server starting on %s:%d", cfg.Server.APIHost, cfg.Server.APIPort)
+	}
+
+	// Start proxy server
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
+
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
+
+	// Register gateway routes
+	enabledGateways := 0
+	for _, gw := range cfg.Gateways {
+		if !gw.Enabled {
+			continue
+		}
+		enabledGateways++
+
+		proxyHandler := proxy.NewHandler(proxy.Config{
+			GatewayName:         gw.Name,
+			GatewayPath:         gw.Path,
+			UpstreamURL:         gw.Upstream,
+			UpstreamType:        gw.Type,
+			Timeout:             time.Duration(gw.Timeout) * time.Second,
+			Logger:              appLogger.Logger,
+			LogDir:              cfg.Logging.Dir,
+			LogEnabled:          cfg.Logging.Enabled,
+			MemoryStore:         memoryStore,
+			TaggingEngine:       taggingEngine,
+			TransformerRegistry: transformerRegistry,
+			WSHub:               wsHub,
+		})
+
+		r.Any(gw.Path+"/*path", proxyHandler.ProxyRequest)
+		appLogger.Sugar().Infof("Gateway '%s' registered: %s/* -> %s", gw.Name, gw.Path, gw.Upstream)
+	}
+
+	if enabledGateways == 0 {
+		log.Printf("warning: no enabled gateways configured")
+	}
+
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	appLogger.Sugar().Infof("AgentGear proxy starting on %s with %d gateway(s)", addr, enabledGateways)
+
+	if err := r.Run(addr); err != nil {
+		log.Fatalf("failed to start server: %v", err)
+	}
+}

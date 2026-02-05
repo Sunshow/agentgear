@@ -1,0 +1,180 @@
+# =============================================================================
+# AgentGear Configuration
+# =============================================================================
+# Copy this file to config.yaml and modify as needed.
+# Environment variables can override config values with prefix AGENTGEAR_
+# Example: AGENTGEAR_SERVER_PORT=8080
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Server Configuration
+# -----------------------------------------------------------------------------
+server:
+  port: 9000              # Proxy server port
+  host: "0.0.0.0"         # Proxy server bind address
+  api_port: 9001          # Internal API port (for management/monitoring)
+  api_host: "0.0.0.0"     # Internal API bind address
+
+# -----------------------------------------------------------------------------
+# Gateway Configuration
+# -----------------------------------------------------------------------------
+# Define upstream API gateways. Each gateway maps a local path to an upstream URL.
+# Multiple gateways can be configured for different upstream services.
+gateways:
+  # Direct Anthropic API gateway
+  - name: "anthropic"
+    path: "/v1"                           # Local path prefix
+    upstream: "https://api.anthropic.com" # Upstream API URL
+    type: ""                              # Gateway type: "" | "warp" | "kiro"
+                                          # - "": No special handling
+                                          # - "warp": Injects $u_warp tag, enables WARP transformers
+                                          # - "kiro": Injects $u_kiro tag, enables Kiro transformers
+    timeout: 300                          # Request timeout in seconds
+    enabled: true                         # Enable/disable this gateway
+
+  # Example: WARP reverse proxy gateway (uncomment to use)
+  # - name: "warp-proxy"
+  #   path: "/warp"
+  #   upstream: "https://warp.example.com"
+  #   type: "warp"
+  #   timeout: 300
+  #   enabled: true
+
+  # Example: Kiro gateway (uncomment to use)
+  # - name: "kiro-proxy"
+  #   path: "/kiro"
+  #   upstream: "https://kiro.example.com"
+  #   type: "kiro"
+  #   timeout: 600
+  #   enabled: true
+
+# -----------------------------------------------------------------------------
+# Logging Configuration
+# -----------------------------------------------------------------------------
+# Request/response logging to files for debugging and analysis.
+logging:
+  enabled: false          # Enable file logging (disable in production for performance)
+  dir: "./logs"           # Log directory path
+  max_size: 100           # Max size per log file in MB before rotation
+  max_backups: 10         # Max number of old log files to retain
+  max_age: 30             # Max days to retain old log files
+
+# -----------------------------------------------------------------------------
+# Memory Store Configuration
+# -----------------------------------------------------------------------------
+# In-memory connection storage for real-time monitoring via API/WebSocket.
+memory:
+  max_connections: 1000       # Max connections to keep in memory (ring buffer)
+  max_request_body_kb: 512    # Max request body size to store (KB), larger bodies truncated
+  max_response_body_kb: 512   # Max response body size to store (KB), larger bodies truncated
+  retention_minutes: 60       # Auto-cleanup connections older than this (minutes)
+
+# -----------------------------------------------------------------------------
+# Tagging System
+# -----------------------------------------------------------------------------
+# Automatically tag requests based on matching rules.
+# Tags can be used to conditionally apply transformers.
+#
+# Tag naming conventions:
+# - System tags: Start with $ (e.g., $a_droid, $u_warp), auto-generated
+# - User tags: Start with letter or _, contain only letters/numbers/_
+#
+# Priority: Smaller value = higher priority (evaluated first)
+# User-defined rules must have priority >= 0
+tagging:
+  skip_mcp_tool_tags: true    # Skip $t_ tag generation for MCP tools (tool names containing "___"), default true
+  rules:
+    # ===== Basic rules (priority 0-99) =====
+    
+    - name: "has_session"
+      priority: 0
+      enabled: true
+      matchers:
+        - type: header              # Matcher type: header | body_json | tag | tags | tool | tools
+          key: "X-Session-Id"       # Header name to match
+          match:
+            op: exists              # Match operation: exists | not_exists | eq | ne | contains | 
+                                    #                 not_contains | prefix | suffix | regex | in | not_in
+      tags:
+        - has_session
+
+    # ===== Client detection rules (priority 100-199) =====
+    
+    - name: "mobile_client"
+      priority: 100
+      enabled: true
+      matchers:
+        - type: header
+          key: "User-Agent"
+          match:
+            op: contains
+            value: "Mobile"
+      tags:
+        - mobile_client
+
+    # ===== Tool detection rules (priority 200-299) =====
+    
+    # Example: Detect requests with specific tools
+    # - name: "has_edit_tool"
+    #   priority: 200
+    #   enabled: true
+    #   matchers:
+    #     - type: tool
+    #       tool: "Edit"
+    #   tags:
+    #     - has_edit
+
+    # ===== Combination rules (priority 500+, depend on previous rules) =====
+    
+    - name: "droid_mobile"
+      priority: 500
+      enabled: true
+      matchers:
+        - type: tags
+          tags: ["$a_droid", "mobile_client"]
+          tag_op: all               # Tag match operation: all (AND) | any (OR)
+      tags:
+        - droid_mobile
+
+# -----------------------------------------------------------------------------
+# Transformers Configuration
+# -----------------------------------------------------------------------------
+# Transform tool calls in requests/responses.
+# Useful for adapting between different Agent protocols.
+#
+# Structure:
+# - definitions: Define transformer logic (source tool -> target tool mapping)
+# - mappings: Bind transformers to conditions (tags/gateways)
+transformers:
+  # Transformer definitions
+  definitions:
+    # Example: Transform create_documents to ExitSpecMode (for Droid compatibility)
+    # - name: "create_documents_to_ExitSpecMode"
+    #   description: "Convert create_documents tool call to ExitSpecMode"
+    #   direction: "response"           # "request" or "response"
+    #   type: "tool"                    # "tool" (default) | "message_inject" | "error_transform"
+    #   source_tool: "create_documents"
+    #   target_tool: "ExitSpecMode"
+    #   accumulate: true                # Accumulate streaming deltas before transform
+    #   param_mapping:
+    #     - from: "new_documents[0].content"
+    #       to: "plan"
+    #       transform: ""               # Optional: transformation function
+
+    # Example: Message injection transformer
+    # - name: "inject_system_reminder"
+    #   description: "Inject system reminder into request"
+    #   direction: "request"
+    #   type: "message_inject"
+    #   inject_text: "Remember to follow the guidelines."
+    #   inject_format: "system-reminder"  # "system-reminder" | "plain"
+
+  # Mapping rules (bind transformers to conditions)
+  mappings:
+    # Example: Apply transformer for Droid agent via WARP gateway
+    # - name: "droid_warp_transform"
+    #   description: "Apply create_documents transform for Droid via WARP"
+    #   enabled: true
+    #   tags: ["$a_droid"]              # Required tags (all must match)
+    #   gateways: ["warp-proxy"]        # Required gateways (any must match)
+    #   transformer: "create_documents_to_ExitSpecMode"
