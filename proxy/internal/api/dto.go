@@ -29,7 +29,11 @@ type ConnectionDTO struct {
 
 	TransformedRequest  bool     `json:"transformed_request"`
 	TransformedResponse bool     `json:"transformed_response"`
-	AppliedTransformers []string `json:"applied_transformers,omitempty"`
+	AppliedRequestTransformers  []string `json:"applied_request_transformers,omitempty"`
+	AppliedResponseTransformers []string `json:"applied_response_transformers,omitempty"`
+
+	TransformedRequestBody  string `json:"transformed_request_body,omitempty"`
+	TransformedResponseBody string `json:"transformed_response_body,omitempty"`
 
 	ParsedData *ParsedDataDTO `json:"parsed_data,omitempty"`
 }
@@ -92,9 +96,12 @@ func ToConnectionDTO(conn *memory.ConnectionInfo) ConnectionDTO {
 		ResponseStatus:      conn.ResponseStatus,
 		ResponseHeaders:     conn.ResponseHeaders,
 		ResponseBody:        string(conn.ResponseBody),
-		TransformedRequest:  conn.TransformedRequest,
-		TransformedResponse: conn.TransformedResponse,
-		AppliedTransformers: conn.AppliedTransformers,
+		TransformedRequest:           conn.TransformedRequest,
+		TransformedResponse:          conn.TransformedResponse,
+		AppliedRequestTransformers:   conn.AppliedRequestTransformers,
+		AppliedResponseTransformers:  conn.AppliedResponseTransformers,
+		TransformedRequestBody:       string(conn.TransformedRequestBody),
+		TransformedResponseBody:      string(conn.TransformedResponseBody),
 	}
 
 	if len(conn.RequestTools) > 0 {

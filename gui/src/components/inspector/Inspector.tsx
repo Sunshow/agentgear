@@ -142,10 +142,10 @@ export function Inspector() {
                   <p className="text-sm text-muted-foreground">No tags</p>
                 )}
               </Section>
-              <Section title={`Applied Mappings (${connection.applied_transformers?.length || 0})`}>
-                {connection.applied_transformers && connection.applied_transformers.length > 0 ? (
+              <Section title={`Request Mappings (${connection.applied_request_transformers?.length || 0})`}>
+                {connection.applied_request_transformers && connection.applied_request_transformers.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
-                    {connection.applied_transformers.map((name, idx) => (
+                    {connection.applied_request_transformers.map((name, idx) => (
                       <span
                         key={idx}
                         className="inline-flex items-center rounded-md bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-500"
@@ -155,7 +155,23 @@ export function Inspector() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">No mappings applied</p>
+                  <p className="text-sm text-muted-foreground">No request mappings applied</p>
+                )}
+              </Section>
+              <Section title={`Response Mappings (${connection.applied_response_transformers?.length || 0})`}>
+                {connection.applied_response_transformers && connection.applied_response_transformers.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {connection.applied_response_transformers.map((name, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center rounded-md bg-green-500/10 px-2 py-1 text-xs font-medium text-green-500"
+                      >
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No response mappings applied</p>
                 )}
               </Section>
             </div>

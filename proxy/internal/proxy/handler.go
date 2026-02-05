@@ -227,7 +227,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 
 	// Update connection info with applied transformers
 	if connInfo != nil && len(appliedTransformers) > 0 {
-		connInfo.AppliedTransformers = append(connInfo.AppliedTransformers, appliedTransformers...)
+		connInfo.AppliedRequestTransformers = append(connInfo.AppliedRequestTransformers, appliedTransformers...)
 		connInfo.TransformedRequest = true
 		connInfo.TransformedRequestBody = transformedReqBody
 	}
@@ -991,7 +991,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 			c.ResponseBody = originalBuffer.Bytes()
 			// Update applied transformers from response processing
 			if len(reqCtx.appliedTransformers) > 0 {
-				c.AppliedTransformers = append(c.AppliedTransformers, reqCtx.appliedTransformers...)
+				c.AppliedResponseTransformers = append(c.AppliedResponseTransformers, reqCtx.appliedTransformers...)
 				c.TransformedResponse = true
 				c.TransformedResponseBody = transformedBuffer.Bytes()
 			}

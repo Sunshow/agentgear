@@ -31,7 +31,8 @@ type ConnectionInfo struct {
 
 	TransformedRequest  bool     `json:"transformed_request"`
 	TransformedResponse bool     `json:"transformed_response"`
-	AppliedTransformers []string `json:"applied_transformers,omitempty"`
+	AppliedRequestTransformers  []string `json:"applied_request_transformers,omitempty"`
+	AppliedResponseTransformers []string `json:"applied_response_transformers,omitempty"`
 
 	ParsedData *ParsedData `json:"parsed_data,omitempty"`
 }

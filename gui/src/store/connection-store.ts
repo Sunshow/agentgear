@@ -23,7 +23,8 @@ export interface ConnectionInfo {
   transformed_response: boolean
   transformed_request_body?: unknown
   transformed_response_body?: unknown
-  applied_transformers?: string[]
+  applied_request_transformers?: string[]
+  applied_response_transformers?: string[]
   parsed_data?: ParsedData
 }
 
