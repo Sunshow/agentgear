@@ -21,6 +21,8 @@ export interface ConnectionInfo {
   response_tools?: { id: string; name: string; input?: Record<string, unknown> }[]
   transformed_request: boolean
   transformed_response: boolean
+  transformed_request_body?: unknown
+  transformed_response_body?: unknown
   applied_transformers?: string[]
   parsed_data?: ParsedData
 }

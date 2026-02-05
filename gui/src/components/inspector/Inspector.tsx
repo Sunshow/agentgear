@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useConnectionStore } from '../../store/connection-store'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
 import { PageContainer } from '../layout/PageContainer'
@@ -8,6 +9,8 @@ import { TagGroup } from '../ui/tag-group'
 export function Inspector() {
   const { selectedId, connections } = useConnectionStore()
   const connection = connections.find((c) => c.id === selectedId)
+  const [showTransformedRequest, setShowTransformedRequest] = useState(false)
+  const [showTransformedResponse, setShowTransformedResponse] = useState(false)
 
   if (!connection) {
     return (
@@ -42,8 +45,37 @@ export function Inspector() {
               <Section title="Headers" onCopy={() => copyToClipboard(connection.request_headers)}>
                 <JsonView data={connection.request_headers} />
               </Section>
-              <Section title="Body" onCopy={() => copyToClipboard(tryParseJson(connection.request_body))}>
-                <JsonView data={tryParseJson(connection.request_body)} />
+              <Section 
+                title="Body" 
+                onCopy={() => copyToClipboard(tryParseJson(
+                  showTransformedRequest && connection.transformed_request_body 
+                    ? connection.transformed_request_body 
+                    : connection.request_body
+                ))}
+              >
+                {connection.transformed_request && (
+                  <div className="mb-2 flex gap-2">
+                    <Button 
+                      variant={!showTransformedRequest ? "default" : "outline"}
+                      onClick={() => setShowTransformedRequest(false)}
+                      className="h-7 px-3 text-xs"
+                    >
+                      Original
+                    </Button>
+                    <Button 
+                      variant={showTransformedRequest ? "default" : "outline"}
+                      onClick={() => setShowTransformedRequest(true)}
+                      className="h-7 px-3 text-xs"
+                    >
+                      Transformed
+                    </Button>
+                  </div>
+                )}
+                <JsonView data={tryParseJson(
+                  showTransformedRequest && connection.transformed_request_body 
+                    ? connection.transformed_request_body 
+                    : connection.request_body
+                )} />
               </Section>
             </div>
           </PageContainer>
@@ -58,8 +90,37 @@ export function Inspector() {
               <Section title="Headers" onCopy={() => copyToClipboard(connection.response_headers)}>
                 <JsonView data={connection.response_headers} />
               </Section>
-              <Section title="Body" onCopy={() => copyToClipboard(tryParseJson(connection.response_body))}>
-                <JsonView data={tryParseJson(connection.response_body)} />
+              <Section 
+                title="Body" 
+                onCopy={() => copyToClipboard(tryParseJson(
+                  showTransformedResponse && connection.transformed_response_body 
+                    ? connection.transformed_response_body 
+                    : connection.response_body
+                ))}
+              >
+                {connection.transformed_response && (
+                  <div className="mb-2 flex gap-2">
+                    <Button 
+                      variant={!showTransformedResponse ? "default" : "outline"}
+                      onClick={() => setShowTransformedResponse(false)}
+                      className="h-7 px-3 text-xs"
+                    >
+                      Original
+                    </Button>
+                    <Button 
+                      variant={showTransformedResponse ? "default" : "outline"}
+                      onClick={() => setShowTransformedResponse(true)}
+                      className="h-7 px-3 text-xs"
+                    >
+                      Transformed
+                    </Button>
+                  </div>
+                )}
+                <JsonView data={tryParseJson(
+                  showTransformedResponse && connection.transformed_response_body 
+                    ? connection.transformed_response_body 
+                    : connection.response_body
+                )} />
               </Section>
             </div>
           </PageContainer>

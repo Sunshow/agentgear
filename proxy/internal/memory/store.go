@@ -26,6 +26,9 @@ type ConnectionInfo struct {
 	ResponseBody   []byte            `json:"response_body,omitempty"`
 	ResponseTools  []ToolCallInfo    `json:"response_tools,omitempty"`
 
+	TransformedRequestBody  []byte `json:"transformed_request_body,omitempty"`
+	TransformedResponseBody []byte `json:"transformed_response_body,omitempty"`
+
 	TransformedRequest  bool     `json:"transformed_request"`
 	TransformedResponse bool     `json:"transformed_response"`
 	AppliedTransformers []string `json:"applied_transformers,omitempty"`

@@ -19,15 +19,17 @@ var BuiltinDefinitions = []TransformerDef{
 
 	// Response 方向 - 带参数转换
 	{
-		Name:        "$droid_warp_create_documents_to_ExitSpecMode",
-		Description: "将 create_documents 转换为 ExitSpecMode，用于 Droid 规格审批",
+		Name:        "$droid_warp_Write_to_ExitSpecMode",
+		Description: "将 Write(.claude/plans/) 转换为 ExitSpecMode，用于 Droid 规格审批",
 		Direction:   "response",
-		SourceTool:  "create_documents",
+		SourceTool:  "Write",
 		TargetTool:  "ExitSpecMode",
-		Accumulate:  true,
+		ParamConditions: []ParamCondition{
+			{Param: "file_path", Op: "prefix", Value: ".claude/plans/"},
+		},
 		ParamMapping: []ParamMapping{
-			{From: "new_documents[0].content", To: "plan"},
-			{From: "new_documents[0].title", To: "title"},
+			{From: "content", To: "plan"},
+			{From: "file_path", To: "title"},
 		},
 		Builtin: true,
 	},
@@ -80,41 +82,7 @@ var BuiltinDefinitions = []TransformerDef{
 		Builtin: true,
 	},
 
-	// Request 方向 - 带 schema 转换
-	{
-		Name:        "$droid_warp_ExitSpecMode_to_create_documents",
-		Description: "ExitSpecMode -> create_documents 请求转换",
-		Direction:   "request",
-		SourceTool:  "ExitSpecMode",
-		TargetTool:  "create_documents",
-		InputSchema: map[string]interface{}{
-			"$schema":              "http://json-schema.org/draft-07/schema#",
-			"type":                 "object",
-			"additionalProperties": false,
-			"required":             []interface{}{"new_documents"},
-			"properties": map[string]interface{}{
-				"new_documents": map[string]interface{}{
-					"type":        "array",
-					"description": "Array of documents to create",
-					"items": map[string]interface{}{
-						"type": "object",
-						"properties": map[string]interface{}{
-							"title": map[string]interface{}{
-								"type":        "string",
-								"description": "Document title",
-							},
-							"content": map[string]interface{}{
-								"type":        "string",
-								"description": "Document content (the plan/spec)",
-							},
-						},
-						"required": []interface{}{"content"},
-					},
-				},
-			},
-		},
-		Builtin: true,
-	},
+	// Request 方向 - 工具名转换
 	{
 		Name:        "$droid_warp_Create_to_Write",
 		Description: "Create -> Write 请求转换",
@@ -170,21 +138,13 @@ This prevents output truncation with long content.`,
 
 // BuiltinMappings defines built-in mapping rules
 var BuiltinMappings = []MappingRule{
-	// Droid + WARP 规格审批
+	// Droid + WARP 规格审批 (Write -> ExitSpecMode)
 	{
-		Name:        "$droid_warp_spec_response",
-		Description: "Droid+WARP: create_documents->ExitSpecMode 响应转换",
+		Name:        "$droid_warp_spec_response_write",
+		Description: "Droid+WARP: Write(.claude/plans/)->ExitSpecMode 响应转换",
 		Enabled:     true,
 		Tags:        []string{"$a_droid", "$u_warp"},
-		Transformer: "$droid_warp_create_documents_to_ExitSpecMode",
-		Builtin:     true,
-	},
-	{
-		Name:        "$droid_warp_spec_request",
-		Description: "Droid+WARP: ExitSpecMode->create_documents 请求转换",
-		Enabled:     true,
-		Tags:        []string{"$a_droid", "$u_warp"},
-		Transformer: "$droid_warp_ExitSpecMode_to_create_documents",
+		Transformer: "$droid_warp_Write_to_ExitSpecMode",
 		Builtin:     true,
 	},
 	// Droid + WARP Edit 参数标准化

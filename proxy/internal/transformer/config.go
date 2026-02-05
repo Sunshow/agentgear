@@ -6,6 +6,13 @@ type ParamMapping struct {
 	Transform string `mapstructure:"transform" json:"transform,omitempty" yaml:"transform,omitempty"`
 }
 
+// ParamCondition defines a condition for matching tool parameters
+type ParamCondition struct {
+	Param string `mapstructure:"param" json:"param" yaml:"param"`    // 参数路径，如 "file_path"
+	Op    string `mapstructure:"op" json:"op" yaml:"op"`             // 操作符: prefix, suffix, contains, equals
+	Value string `mapstructure:"value" json:"value" yaml:"value"`    // 匹配值
+}
+
 // TransformerDef defines a transformer's logic (source tool -> target tool mapping)
 type TransformerDef struct {
 	Name         string                 `mapstructure:"name" json:"name" yaml:"name"`
@@ -26,6 +33,7 @@ type TransformerDef struct {
 	ContextTokenLimit     int     `mapstructure:"context_token_limit" json:"context_token_limit,omitempty" yaml:"context_token_limit,omitempty"`
 	ContextThresholdRatio float64 `mapstructure:"context_threshold_ratio" json:"context_threshold_ratio,omitempty" yaml:"context_threshold_ratio,omitempty"`
 	TokenEstimateRatio    float64 `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
+	ParamConditions       []ParamCondition `mapstructure:"param_conditions" json:"param_conditions,omitempty" yaml:"param_conditions,omitempty"`
 	Builtin              bool   `mapstructure:"builtin" json:"builtin" yaml:"builtin,omitempty"`
 	IsTemplate   bool                   `mapstructure:"is_template" json:"is_template,omitempty" yaml:"is_template,omitempty"`
 	TemplateRef  string                 `mapstructure:"template_ref" json:"template_ref,omitempty" yaml:"template_ref,omitempty"`

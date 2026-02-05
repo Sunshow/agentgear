@@ -35,16 +35,24 @@ func (tm *ToolMapper) GetRegistry() *Registry {
 }
 
 func (tm *ToolMapper) NeedsTransform(toolName string, tags []string) bool {
+	return tm.NeedsTransformWithInput(toolName, tags, nil)
+}
+
+func (tm *ToolMapper) NeedsTransformWithInput(toolName string, tags []string, input map[string]interface{}) bool {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
 	if tm.registry == nil {
 		return false
 	}
-	return tm.registry.GetResponseTransformer(toolName, tags) != nil
+	return tm.registry.GetResponseTransformerWithInput(toolName, tags, input) != nil
 }
 
 func (tm *ToolMapper) NeedsAccumulate(toolName string, tags []string) bool {
+	return tm.NeedsAccumulateWithInput(toolName, tags, nil)
+}
+
+func (tm *ToolMapper) NeedsAccumulateWithInput(toolName string, tags []string, input map[string]interface{}) bool {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
@@ -52,7 +60,7 @@ func (tm *ToolMapper) NeedsAccumulate(toolName string, tags []string) bool {
 		return false
 	}
 
-	cfg := tm.registry.GetResponseTransformer(toolName, tags)
+	cfg := tm.registry.GetResponseTransformerWithInput(toolName, tags, input)
 	if cfg != nil {
 		return cfg.Accumulate
 	}
@@ -60,6 +68,10 @@ func (tm *ToolMapper) NeedsAccumulate(toolName string, tags []string) bool {
 }
 
 func (tm *ToolMapper) TransformToolName(toolName string, tags []string) string {
+	return tm.TransformToolNameWithInput(toolName, tags, nil)
+}
+
+func (tm *ToolMapper) TransformToolNameWithInput(toolName string, tags []string, input map[string]interface{}) string {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
@@ -67,7 +79,7 @@ func (tm *ToolMapper) TransformToolName(toolName string, tags []string) string {
 		return toolName
 	}
 
-	cfg := tm.registry.GetResponseTransformer(toolName, tags)
+	cfg := tm.registry.GetResponseTransformerWithInput(toolName, tags, input)
 	if cfg != nil {
 		return cfg.TargetTool
 	}
@@ -75,6 +87,10 @@ func (tm *ToolMapper) TransformToolName(toolName string, tags []string) string {
 }
 
 func (tm *ToolMapper) TransformInput(toolName string, input map[string]interface{}, tags []string) map[string]interface{} {
+	return tm.TransformInputWithInput(toolName, input, tags, input)
+}
+
+func (tm *ToolMapper) TransformInputWithInput(toolName string, input map[string]interface{}, tags []string, conditionInput map[string]interface{}) map[string]interface{} {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
@@ -82,7 +98,7 @@ func (tm *ToolMapper) TransformInput(toolName string, input map[string]interface
 		return input
 	}
 
-	cfg := tm.registry.GetResponseTransformer(toolName, tags)
+	cfg := tm.registry.GetResponseTransformerWithInput(toolName, tags, conditionInput)
 	if cfg != nil {
 		return tm.registry.TransformInput(cfg, input)
 	}
@@ -105,6 +121,30 @@ func (tm *ToolMapper) TransformInputJSON(toolName string, inputJSON string, tags
 		return inputJSON, err
 	}
 	return string(result), nil
+}
+
+// MayNeedAccumulate checks if there's any transformer (with or without conditions) that may need accumulation
+func (tm *ToolMapper) MayNeedAccumulate(toolName string, tags []string) bool {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	if tm.registry == nil {
+		return false
+	}
+
+	return tm.registry.MayNeedAccumulate(toolName, tags)
+}
+
+// HasPendingTransform checks if there's a transformer with ParamConditions that needs deferred evaluation
+func (tm *ToolMapper) HasPendingTransform(toolName string, tags []string) bool {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	if tm.registry == nil {
+		return false
+	}
+
+	return tm.registry.HasPendingTransform(toolName, tags)
 }
 
 func (tm *ToolMapper) GetRequestMapping(toolName string, tags []string) *TransformerConfig {

@@ -229,6 +229,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 	if connInfo != nil && len(appliedTransformers) > 0 {
 		connInfo.AppliedTransformers = append(connInfo.AppliedTransformers, appliedTransformers...)
 		connInfo.TransformedRequest = true
+		connInfo.TransformedRequestBody = transformedReqBody
 	}
 
 	reqCtx := &requestContext{
@@ -748,19 +749,21 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 }
 
 type toolBlockState struct {
-	index           int
-	toolID          string
-	toolName        string
-	inputParts      []string
-	needsTransform  bool
-	needsAccumulate bool
+	index            int
+	toolID           string
+	toolName         string
+	inputParts       []string
+	needsTransform   bool
+	needsAccumulate  bool
+	pendingTransform bool // Has ParamConditions, needs deferred evaluation
 }
 
 type toolBlockAccumulator struct {
 	toolName     string
 	firstToolID  string
-	titleParts   []string
-	contentParts []string
+	fullInput    map[string]interface{} // Store complete input for param mapping
+	titleParts   []string               // Legacy: for create_documents compatibility
+	contentParts []string               // Legacy: for create_documents compatibility
 	blockCount   int
 }
 
@@ -990,6 +993,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 			if len(reqCtx.appliedTransformers) > 0 {
 				c.AppliedTransformers = append(c.AppliedTransformers, reqCtx.appliedTransformers...)
 				c.TransformedResponse = true
+				c.TransformedResponseBody = transformedBuffer.Bytes()
 			}
 		})
 		if h.wsHub != nil {
@@ -1017,7 +1021,7 @@ func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*to
 	case "content_block_delta":
 		return h.handleBlockDelta(data, toolBlocks, accumulator, tags)
 	case "content_block_stop":
-		return h.handleBlockStop(data, toolBlocks, accumulator)
+		return h.handleBlockStop(data, toolBlocks, accumulator, nextOutputIndex, tags, reqCtx)
 	case "message_delta":
 		// Cache message_delta, send it before message_stop
 		*pendingMessageDelta = &sseEvent{eventType: eventType, data: data}
@@ -1077,14 +1081,16 @@ func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockSta
 
 	needsTransform := h.toolMapper.NeedsTransform(toolName, tags)
 	needsAccumulate := h.toolMapper.NeedsAccumulate(toolName, tags)
+	pendingTransform := h.toolMapper.HasPendingTransform(toolName, tags)
 
 	toolBlocks[index] = &toolBlockState{
-		index:           index,
-		toolID:          toolID,
-		toolName:        toolName,
-		inputParts:      []string{},
-		needsTransform:  needsTransform,
-		needsAccumulate: needsAccumulate,
+		index:            index,
+		toolID:           toolID,
+		toolName:         toolName,
+		inputParts:       []string{},
+		needsTransform:   needsTransform,
+		needsAccumulate:  needsAccumulate,
+		pendingTransform: pendingTransform,
 	}
 
 	if needsTransform && needsAccumulate {
@@ -1098,6 +1104,12 @@ func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockSta
 			blockCount:   0,
 		}
 		// Suppress output, will accumulate
+		return nil
+	}
+
+	if pendingTransform && !needsTransform {
+		// Has ParamConditions but no unconditional match yet
+		// Suppress output, collect input, evaluate in handleBlockStop
 		return nil
 	}
 
@@ -1150,7 +1162,7 @@ func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockSta
 	index := int(indexFloat)
 
 	block, exists := toolBlocks[index]
-	if !exists || !block.needsTransform {
+	if !exists || (!block.needsTransform && !block.pendingTransform) {
 		return []sseEvent{{eventType: "content_block_delta", data: data}}
 	}
 
@@ -1168,6 +1180,11 @@ func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockSta
 			return nil
 		}
 
+		if block.pendingTransform && !block.needsTransform {
+			// Pending transform: collect input, suppress delta, evaluate in handleBlockStop
+			return nil
+		}
+
 		// Simple transform type: transform the JSON params inline
 		transformedJSON, err := h.toolMapper.TransformInputJSON(block.toolName, partialJSON, tags)
 		if err == nil && transformedJSON != partialJSON {
@@ -1182,7 +1199,7 @@ func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockSta
 	return []sseEvent{{eventType: "content_block_delta", data: data}}
 }
 
-func (h *Handler) handleBlockStop(data string, toolBlocks map[int]*toolBlockState, accumulator **toolBlockAccumulator) []sseEvent {
+func (h *Handler) handleBlockStop(data string, toolBlocks map[int]*toolBlockState, accumulator **toolBlockAccumulator, nextOutputIndex *int, tags []string, reqCtx *requestContext) []sseEvent {
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return []sseEvent{{eventType: "content_block_stop", data: data}}
@@ -1197,6 +1214,101 @@ func (h *Handler) handleBlockStop(data string, toolBlocks map[int]*toolBlockStat
 	block, exists := toolBlocks[index]
 	if !exists {
 		return []sseEvent{{eventType: "content_block_stop", data: data}}
+	}
+
+	// For pending transform tools, evaluate with complete input
+	if block.pendingTransform && !block.needsTransform && len(block.inputParts) > 0 {
+		fullJSON := strings.Join(block.inputParts, "")
+		var input map[string]interface{}
+		if err := json.Unmarshal([]byte(fullJSON), &input); err == nil {
+			// Check if any transformer with ParamConditions matches
+			if h.toolMapper.NeedsTransformWithInput(block.toolName, tags, input) {
+				// Transform matched! Generate complete transformed block
+				targetToolName := h.toolMapper.TransformToolNameWithInput(block.toolName, tags, input)
+				transformedInput := h.toolMapper.TransformInputWithInput(block.toolName, input, tags, input)
+				transformedInputJSON, _ := json.Marshal(transformedInput)
+
+				outputIndex := *nextOutputIndex
+				*nextOutputIndex++
+
+				// Emit complete transformed tool block
+				startData := fmt.Sprintf(`{"content_block":{"id":"%s","input":{},"name":"%s","type":"tool_use"},"index":%d,"type":"content_block_start"}`,
+					block.toolID, targetToolName, outputIndex)
+				deltaData := fmt.Sprintf(`{"delta":{"partial_json":%s,"type":"input_json_delta"},"index":%d,"type":"content_block_delta"}`,
+					jsonEscape(string(transformedInputJSON)), outputIndex)
+				stopData := fmt.Sprintf(`{"index":%d,"type":"content_block_stop"}`, outputIndex)
+
+				// Log the transformation
+				mappingName := ""
+				if h.transformerRegistry != nil {
+					if cfg := h.transformerRegistry.GetResponseTransformerWithInput(block.toolName, tags, input); cfg != nil {
+						mappingName = cfg.Name
+						if reqCtx != nil {
+							reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, mappingName)
+						}
+					}
+				}
+				log.Printf("[MAPPING] Response (pending): %s -> %s (mapping: %s, tags: %v)", block.toolName, targetToolName, mappingName, tags)
+
+				delete(toolBlocks, index)
+				return []sseEvent{
+					{eventType: "content_block_start", data: startData},
+					{eventType: "content_block_delta", data: deltaData},
+					{eventType: "content_block_stop", data: stopData},
+				}
+			}
+		}
+		// ParamConditions not matched, try fallback to unconditional transformer (e.g., Write -> Create)
+		if h.toolMapper.NeedsTransform(block.toolName, tags) {
+			targetToolName := h.toolMapper.TransformToolName(block.toolName, tags)
+			transformedInput := h.toolMapper.TransformInput(block.toolName, input, tags)
+			transformedInputJSON, _ := json.Marshal(transformedInput)
+
+			outputIndex := *nextOutputIndex
+			*nextOutputIndex++
+
+			startData := fmt.Sprintf(`{"content_block":{"id":"%s","input":{},"name":"%s","type":"tool_use"},"index":%d,"type":"content_block_start"}`,
+				block.toolID, targetToolName, outputIndex)
+			deltaData := fmt.Sprintf(`{"delta":{"partial_json":%s,"type":"input_json_delta"},"index":%d,"type":"content_block_delta"}`,
+				jsonEscape(string(transformedInputJSON)), outputIndex)
+			stopData := fmt.Sprintf(`{"index":%d,"type":"content_block_stop"}`, outputIndex)
+
+			// Log the fallback transformation
+			mappingName := ""
+			if h.transformerRegistry != nil {
+				if cfg := h.transformerRegistry.GetResponseTransformer(block.toolName, tags); cfg != nil {
+					mappingName = cfg.Name
+					if reqCtx != nil {
+						reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, mappingName)
+					}
+				}
+			}
+			log.Printf("[MAPPING] Response (fallback): %s -> %s (mapping: %s, tags: %v)", block.toolName, targetToolName, mappingName, tags)
+
+			delete(toolBlocks, index)
+			return []sseEvent{
+				{eventType: "content_block_start", data: startData},
+				{eventType: "content_block_delta", data: deltaData},
+				{eventType: "content_block_stop", data: stopData},
+			}
+		}
+
+		// No transform matched at all, output original block
+		outputIndex := *nextOutputIndex
+		*nextOutputIndex++
+
+		startData := fmt.Sprintf(`{"content_block":{"id":"%s","input":{},"name":"%s","type":"tool_use"},"index":%d,"type":"content_block_start"}`,
+			block.toolID, block.toolName, outputIndex)
+		deltaData := fmt.Sprintf(`{"delta":{"partial_json":%s,"type":"input_json_delta"},"index":%d,"type":"content_block_delta"}`,
+			jsonEscape(fullJSON), outputIndex)
+		stopData := fmt.Sprintf(`{"index":%d,"type":"content_block_stop"}`, outputIndex)
+
+		delete(toolBlocks, index)
+		return []sseEvent{
+			{eventType: "content_block_start", data: startData},
+			{eventType: "content_block_delta", data: deltaData},
+			{eventType: "content_block_stop", data: stopData},
+		}
 	}
 
 	// For accumulate type tools, merge all inputParts and parse complete JSON at block end

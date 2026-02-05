@@ -89,10 +89,14 @@ func replacePlaceholder(s string, args map[string]string) string {
 }
 
 func (r *Registry) GetResponseTransformer(toolName string, tags []string) *TransformerConfig {
+	return r.GetResponseTransformerWithInput(toolName, tags, nil)
+}
+
+func (r *Registry) GetResponseTransformerWithInput(toolName string, tags []string, input map[string]interface{}) *TransformerConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if def, mapping := r.findTransformer(toolName, "response", tags); def != nil && mapping != nil {
+	if def, mapping := r.findTransformerWithInput(toolName, "response", tags, input); def != nil && mapping != nil {
 		return r.defToConfig(def, mapping)
 	}
 	return nil
@@ -102,14 +106,14 @@ func (r *Registry) GetRequestTransformer(toolName string, tags []string) *Transf
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if def, mapping := r.findTransformer(toolName, "request", tags); def != nil && mapping != nil {
+	if def, mapping := r.findTransformerWithInput(toolName, "request", tags, nil); def != nil && mapping != nil {
 		return r.defToConfig(def, mapping)
 	}
 	return nil
 }
 
-// findTransformer finds a matching transformer definition and mapping
-func (r *Registry) findTransformer(toolName, direction string, tags []string) (*TransformerDef, *MappingRule) {
+// findTransformerWithInput finds a matching transformer definition and mapping with input condition check
+func (r *Registry) findTransformerWithInput(toolName, direction string, tags []string, input map[string]interface{}) (*TransformerDef, *MappingRule) {
 	for i := range r.mappings {
 		m := &r.mappings[i]
 		if !m.Enabled {
@@ -122,11 +126,104 @@ func (r *Registry) findTransformer(toolName, direction string, tags []string) (*
 		for j := range r.definitions {
 			d := &r.definitions[j]
 			if d.Name == m.Transformer && d.Direction == direction && d.SourceTool == toolName {
-				return d, m
+				// Check param conditions
+				if r.matchParamConditions(d.ParamConditions, input) {
+					return d, m
+				}
 			}
 		}
 	}
 	return nil, nil
+}
+
+// matchParamConditions checks if input matches all param conditions
+// When input is nil and conditions exist, returns true (optimistic match) for deferred evaluation
+func (r *Registry) matchParamConditions(conditions []ParamCondition, input map[string]interface{}) bool {
+	if len(conditions) == 0 {
+		return true
+	}
+	if input == nil {
+		return true // Optimistic match: defer actual validation until input is available
+	}
+	for _, cond := range conditions {
+		value := extractValue(input, cond.Param)
+		strValue, ok := value.(string)
+		if !ok {
+			return false
+		}
+		switch cond.Op {
+		case "prefix":
+			if !strings.HasPrefix(strValue, cond.Value) {
+				return false
+			}
+		case "suffix":
+			if !strings.HasSuffix(strValue, cond.Value) {
+				return false
+			}
+		case "contains":
+			if !strings.Contains(strValue, cond.Value) {
+				return false
+			}
+		case "equals":
+			if strValue != cond.Value {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// findTransformer finds a matching transformer definition and mapping (backward compatible)
+func (r *Registry) findTransformer(toolName, direction string, tags []string) (*TransformerDef, *MappingRule) {
+	return r.findTransformerWithInput(toolName, direction, tags, nil)
+}
+
+// MayNeedAccumulate checks if there's any transformer that may need accumulation for the tool
+func (r *Registry) MayNeedAccumulate(toolName string, tags []string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, tags) {
+			continue
+		}
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Direction == "response" && d.SourceTool == toolName && d.Accumulate {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// HasPendingTransform checks if there's a transformer with ParamConditions for the tool
+func (r *Registry) HasPendingTransform(toolName string, tags []string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, tags) {
+			continue
+		}
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Direction == "response" && d.SourceTool == toolName && len(d.ParamConditions) > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // defToConfig converts new structure to TransformerConfig
