@@ -129,7 +129,11 @@ This prevents output truncation with long content.`,
 		ErrorCode:             "context_length_exceeded",
 		ErrorMessage:          "prompt is too long: request size exceeds limit",
 		RequestSizeThreshold:  500000, // 响应后兜底检测阈值 500KB
-		ContextTokenLimit:     200000,
+		ContextTokenLimit:     200000, // 默认值（适用于大部分模型）
+		ModelContextLimits: []ModelContextLimit{
+			{ModelPattern: "claude-opus-4-6*", TokenLimit: 1000000},  // claude-opus-4-6, claude-opus-4-6-20260101 等
+			{ModelPattern: "claude-opus-4.6*", TokenLimit: 1000000}, // claude-opus-4.6, claude-opus-4.6-20260101 等
+		},
 		ContextThresholdRatio: 0.85,
 		TokenEstimateRatio:    3.5,
 		Builtin:               true,

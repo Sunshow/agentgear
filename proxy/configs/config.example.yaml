@@ -169,6 +169,23 @@ transformers:
     #   inject_text: "Remember to follow the guidelines."
     #   inject_format: "system-reminder"  # "system-reminder" | "plain"
 
+    # Example: Error transform with model-specific context limits
+    # - name: "kiro_context_check"
+    #   description: "Context limit check with model-specific thresholds"
+    #   direction: "response"
+    #   type: "error_transform"
+    #   error_code: "context_length_exceeded"
+    #   error_message: "prompt is too long: request size exceeds limit"
+    #   request_size_threshold: 500000
+    #   context_token_limit: 200000  # Default limit for most models
+    #   model_context_limits:         # Model-specific limits (higher priority)
+    #     - model_pattern: "claude-opus-4-6*"   # Matches claude-opus-4-6, claude-opus-4-6-20260101, etc.
+    #       token_limit: 1000000
+    #     - model_pattern: "claude-opus-4.6*"   # Matches claude-opus-4.6, claude-opus-4.6-20260101, etc.
+    #       token_limit: 1000000
+    #   context_threshold_ratio: 0.85  # Trigger at 85% of limit
+    #   token_estimate_ratio: 3.5      # Bytes to tokens estimation ratio
+
   # Mapping rules (bind transformers to conditions)
   mappings:
     # Example: Apply transformer for Droid agent via WARP gateway

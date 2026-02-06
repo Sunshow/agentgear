@@ -568,6 +568,39 @@ func (h *Handler) shouldTransformEmptyStreamToContextError(reqCtx *requestContex
 	return nil
 }
 
+// matchModelPattern 检查模型名是否匹配模式（支持通配符 *）
+func matchModelPattern(model, pattern string) bool {
+	if pattern == "" {
+		return false
+	}
+
+	// 精确匹配
+	if model == pattern {
+		return true
+	}
+
+	// 通配符匹配
+	if strings.HasSuffix(pattern, "*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		return strings.HasPrefix(model, prefix)
+	}
+
+	return false
+}
+
+// getContextTokenLimit 根据模型名获取对应的 token 限制
+func getContextTokenLimit(handler *transformer.TransformerDef, model string) int {
+	if model != "" && len(handler.ModelContextLimits) > 0 {
+		for _, limit := range handler.ModelContextLimits {
+			if matchModelPattern(model, limit.ModelPattern) {
+				return limit.TokenLimit
+			}
+		}
+	}
+	// 返回默认值
+	return handler.ContextTokenLimit
+}
+
 // shouldPreemptContextError 请求前预检测：基于 token 估算检查是否超过上下文限制
 func (h *Handler) shouldPreemptContextError(reqCtx *requestContext) *transformer.TransformerDef {
 	// 跳过压缩请求（避免死循环）
@@ -580,7 +613,22 @@ func (h *Handler) shouldPreemptContextError(reqCtx *requestContext) *transformer
 		return nil
 	}
 	handler := h.transformerRegistry.GetErrorTransformer(reqCtx.tags)
-	if handler == nil || handler.ContextTokenLimit == 0 {
+	if handler == nil {
+		return nil
+	}
+
+	// 从请求体中提取模型名
+	var req map[string]interface{}
+	var model string
+	if err := json.Unmarshal(reqCtx.reqBody, &req); err == nil {
+		if m, ok := req["model"].(string); ok {
+			model = m
+		}
+	}
+
+	// 根据模型获取对应的 token 限制
+	contextTokenLimit := getContextTokenLimit(handler, model)
+	if contextTokenLimit == 0 {
 		return nil
 	}
 
@@ -596,10 +644,12 @@ func (h *Handler) shouldPreemptContextError(reqCtx *requestContext) *transformer
 
 	// 估算 token 数
 	estimatedTokens := float64(len(reqCtx.reqBody)) / ratio
-	threshold := float64(handler.ContextTokenLimit) * thresholdRatio
+	threshold := float64(contextTokenLimit) * thresholdRatio
 
 	if estimatedTokens > threshold {
 		h.logger.Warn("preemptive context limit check triggered",
+			zap.String("model", model),
+			zap.Int("context_token_limit", contextTokenLimit),
 			zap.Int("request_size", len(reqCtx.reqBody)),
 			zap.Float64("estimated_tokens", estimatedTokens),
 			zap.Float64("threshold", threshold),

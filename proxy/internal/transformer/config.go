@@ -13,6 +13,12 @@ type ParamCondition struct {
 	Value string `mapstructure:"value" json:"value" yaml:"value"`    // 匹配值
 }
 
+// ModelContextLimit defines model-specific context token limits
+type ModelContextLimit struct {
+	ModelPattern string `mapstructure:"model_pattern" json:"model_pattern" yaml:"model_pattern"` // 模型匹配模式（支持通配符 *）
+	TokenLimit   int    `mapstructure:"token_limit" json:"token_limit" yaml:"token_limit"`       // 该模型的 token 限制
+}
+
 // TransformerDef defines a transformer's logic (source tool -> target tool mapping)
 type TransformerDef struct {
 	Name         string                 `mapstructure:"name" json:"name" yaml:"name"`
@@ -27,13 +33,14 @@ type TransformerDef struct {
 	InjectText   string                 `mapstructure:"inject_text" json:"inject_text,omitempty" yaml:"inject_text,omitempty"`     // 注入的文本内容
 	InjectFormat string                 `mapstructure:"inject_format" json:"inject_format,omitempty" yaml:"inject_format,omitempty"` // "system-reminder" | "plain"
 	// error_transform 类型专用字段
-	ErrorCode             string  `mapstructure:"error_code" json:"error_code,omitempty" yaml:"error_code,omitempty"`
-	ErrorMessage          string  `mapstructure:"error_message" json:"error_message,omitempty" yaml:"error_message,omitempty"`
-	RequestSizeThreshold  int     `mapstructure:"request_size_threshold" json:"request_size_threshold,omitempty" yaml:"request_size_threshold,omitempty"`
-	ContextTokenLimit     int     `mapstructure:"context_token_limit" json:"context_token_limit,omitempty" yaml:"context_token_limit,omitempty"`
-	ContextThresholdRatio float64 `mapstructure:"context_threshold_ratio" json:"context_threshold_ratio,omitempty" yaml:"context_threshold_ratio,omitempty"`
-	TokenEstimateRatio    float64 `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
-	ParamConditions       []ParamCondition `mapstructure:"param_conditions" json:"param_conditions,omitempty" yaml:"param_conditions,omitempty"`
+	ErrorCode             string               `mapstructure:"error_code" json:"error_code,omitempty" yaml:"error_code,omitempty"`
+	ErrorMessage          string               `mapstructure:"error_message" json:"error_message,omitempty" yaml:"error_message,omitempty"`
+	RequestSizeThreshold  int                  `mapstructure:"request_size_threshold" json:"request_size_threshold,omitempty" yaml:"request_size_threshold,omitempty"`
+	ContextTokenLimit     int                  `mapstructure:"context_token_limit" json:"context_token_limit,omitempty" yaml:"context_token_limit,omitempty"`
+	ModelContextLimits    []ModelContextLimit  `mapstructure:"model_context_limits" json:"model_context_limits,omitempty" yaml:"model_context_limits,omitempty"`
+	ContextThresholdRatio float64              `mapstructure:"context_threshold_ratio" json:"context_threshold_ratio,omitempty" yaml:"context_threshold_ratio,omitempty"`
+	TokenEstimateRatio    float64              `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
+	ParamConditions       []ParamCondition     `mapstructure:"param_conditions" json:"param_conditions,omitempty" yaml:"param_conditions,omitempty"`
 	Builtin              bool   `mapstructure:"builtin" json:"builtin" yaml:"builtin,omitempty"`
 	IsTemplate   bool                   `mapstructure:"is_template" json:"is_template,omitempty" yaml:"is_template,omitempty"`
 	TemplateRef  string                 `mapstructure:"template_ref" json:"template_ref,omitempty" yaml:"template_ref,omitempty"`
