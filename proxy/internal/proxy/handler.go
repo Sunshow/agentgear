@@ -166,7 +166,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 		}
 		tags = h.taggingEngine.Match(ctx)
 		if len(tags) > 0 {
-			h.logger.Debug("request matched tags", zap.Strings("tags", tags))
+			h.logger.Info("request matched tags", zap.Strings("tags", tags))
 		}
 	}
 
@@ -763,7 +763,7 @@ func (h *Handler) applyRequestHeaderInjections(proxyReq *http.Request, tags []st
 		for _, header := range def.HeaderInjections {
 			value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
 			proxyReq.Header.Set(header.Key, value)
-			h.logger.Debug("injected request header",
+			h.logger.Info("injected request header",
 				zap.String("transformer", def.Name),
 				zap.String("key", header.Key),
 				zap.String("value", value))
@@ -792,7 +792,7 @@ func (h *Handler) applyRequestHeaderInjections(proxyReq *http.Request, tags []st
 				for _, header := range def.HeaderInjections {
 					value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
 					proxyReq.Header.Set(header.Key, value)
-					h.logger.Debug("injected request header",
+					h.logger.Info("injected request header",
 						zap.String("transformer", def.Name),
 						zap.String("key", header.Key),
 						zap.String("value", value))
@@ -818,7 +818,7 @@ func (h *Handler) applyResponseHeaderInjections(c *gin.Context, tags []string, r
 		for _, header := range def.HeaderInjections {
 			value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
 			c.Header(header.Key, value)
-			h.logger.Debug("injected response header",
+			h.logger.Info("injected response header",
 				zap.String("transformer", def.Name),
 				zap.String("key", header.Key),
 				zap.String("value", value))
@@ -847,7 +847,7 @@ func (h *Handler) applyResponseHeaderInjections(c *gin.Context, tags []string, r
 				for _, header := range def.HeaderInjections {
 					value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
 					c.Header(header.Key, value)
-					h.logger.Debug("injected response header",
+					h.logger.Info("injected response header",
 						zap.String("transformer", def.Name),
 						zap.String("key", header.Key),
 						zap.String("value", value))
