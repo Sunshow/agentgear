@@ -515,7 +515,24 @@ func (h *Handler) shouldTransformToPatternError(reqCtx *requestContext, respStat
 		return nil
 	}
 
-	return h.transformerRegistry.GetErrorPatternTransformer(reqCtx.tags, string(respBody))
+	handler := h.transformerRegistry.GetErrorPatternTransformer(reqCtx.tags, string(respBody))
+	if handler != nil {
+		h.logger.Warn("error response matched pattern, transforming to context_length_exceeded",
+			zap.String("transformer", handler.Name),
+			zap.Strings("patterns", handler.ErrorPatterns),
+			zap.Int("response_status", respStatus),
+			zap.Int("response_body_len", len(respBody)),
+			zap.String("response_body_preview", truncateString(string(respBody), 200)))
+	}
+	return handler
+}
+
+// truncateString truncates a string to maxLen characters
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // writeContextLengthError 写入上下文超限错误响应
