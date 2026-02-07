@@ -468,11 +468,6 @@ func (h *Handler) isCompressRequest(body []byte) bool {
 
 // shouldTransformToContextError 检查是否应该将错误转换为上下文超限错误
 func (h *Handler) shouldTransformToContextError(reqCtx *requestContext, respStatus int, respBodyLen int) *transformer.TransformerDef {
-	// 只处理错误响应
-	if respStatus < 400 {
-		return nil
-	}
-
 	// 跳过压缩请求（避免死循环）
 	if h.isCompressRequest(reqCtx.reqBody) {
 		return nil
@@ -489,10 +484,9 @@ func (h *Handler) shouldTransformToContextError(reqCtx *requestContext, respStat
 
 	// 检查请求大小是否超过阈值
 	if handler.RequestSizeThreshold > 0 && len(reqCtx.reqBody) >= handler.RequestSizeThreshold {
-		// 只处理空响应或很小的错误响应（nginx 拒绝通常返回空响应）
-		if respBodyLen <= 100 {
-			return handler
-		}
+		log.Printf("[ERROR_TRANSFORM] Response size threshold matched: transformer=%s request_size=%d threshold=%d response_status=%d response_body_len=%d",
+			handler.Name, len(reqCtx.reqBody), handler.RequestSizeThreshold, respStatus, respBodyLen)
+		return handler
 	}
 
 	return nil
@@ -517,12 +511,8 @@ func (h *Handler) shouldTransformToPatternError(reqCtx *requestContext, respStat
 
 	handler := h.transformerRegistry.GetErrorPatternTransformer(reqCtx.tags, string(respBody))
 	if handler != nil {
-		h.logger.Warn("error response matched pattern, transforming to context_length_exceeded",
-			zap.String("transformer", handler.Name),
-			zap.Strings("patterns", handler.ErrorPatterns),
-			zap.Int("response_status", respStatus),
-			zap.Int("response_body_len", len(respBody)),
-			zap.String("response_body_preview", truncateString(string(respBody), 200)))
+		log.Printf("[ERROR_TRANSFORM] Pattern matched: transformer=%s patterns=%v request_size=%d response_status=%d response_body_len=%d response_body_preview=%s",
+			handler.Name, handler.ErrorPatterns, len(reqCtx.reqBody), respStatus, len(respBody), truncateString(string(respBody), 200))
 	}
 	return handler
 }
@@ -537,10 +527,8 @@ func truncateString(s string, maxLen int) string {
 
 // writeContextLengthError 写入上下文超限错误响应
 func (h *Handler) writeContextLengthError(c *gin.Context, handler *transformer.TransformerDef, reqSize int) {
-	h.logger.Warn("transforming error response to context_length_exceeded",
-		zap.Int("request_size", reqSize),
-		zap.Int("threshold", handler.RequestSizeThreshold),
-		zap.String("transformer", handler.Name))
+	log.Printf("[ERROR_TRANSFORM] Writing context_length_exceeded error: transformer=%s request_size=%d error_code=%s error_message=%s",
+		handler.Name, reqSize, handler.ErrorCode, handler.ErrorMessage)
 
 	c.Header("Content-Type", "application/json")
 	c.JSON(http.StatusBadRequest, gin.H{
@@ -687,13 +675,8 @@ func (h *Handler) shouldPreemptContextError(reqCtx *requestContext) *transformer
 	threshold := float64(contextTokenLimit) * thresholdRatio
 
 	if estimatedTokens > threshold {
-		h.logger.Warn("preemptive context limit check triggered",
-			zap.String("model", model),
-			zap.Int("context_token_limit", contextTokenLimit),
-			zap.Int("request_size", len(reqCtx.reqBody)),
-			zap.Float64("estimated_tokens", estimatedTokens),
-			zap.Float64("threshold", threshold),
-			zap.String("transformer", handler.Name))
+		log.Printf("[ERROR_TRANSFORM] Preemptive context limit check triggered: transformer=%s model=%s request_size=%d estimated_tokens=%.0f threshold=%.0f context_token_limit=%d",
+			handler.Name, model, len(reqCtx.reqBody), estimatedTokens, threshold, contextTokenLimit)
 		return handler
 	}
 
@@ -1067,6 +1050,23 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		return
 	}
 
+	// 检查成功响应是否也需要转换（基于请求大小阈值）
+	if handler := h.shouldTransformToContextError(reqCtx, resp.StatusCode, 0); handler != nil {
+		// 读取部分响应用于日志
+		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		reqCtx.meta.Response = &ResponseMeta{
+			Status:  resp.StatusCode,
+			Headers: sanitizeHeaders(resp.Header),
+		}
+		reqCtx.respBody = preview
+		reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
+		reqCtx.forceLog = true
+		h.updateConnectionStatus(reqCtx.connInfo, "error_transformed", reqCtx.meta.DurationMs)
+		h.saveLog(reqCtx)
+		h.writeContextLengthError(c, handler, len(reqCtx.reqBody))
+		return
+	}
+
 	// === 只读取第一个事件进行检测 ===
 	var originalBuffer bytes.Buffer
 	teeReader := io.TeeReader(resp.Body, &originalBuffer)
@@ -1126,9 +1126,8 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 			reqCtx.forceLog = true
 			h.updateConnectionStatus(reqCtx.connInfo, "error_transformed", reqCtx.meta.DurationMs)
 			h.saveLog(reqCtx)
-			h.logger.Warn("empty stream response (message_start with empty content), converting to context_length_exceeded",
-				zap.Int("request_size", len(reqCtx.reqBody)),
-				zap.String("transformer", handler.Name))
+			log.Printf("[ERROR_TRANSFORM] Empty stream response (message_start with empty content): transformer=%s request_size=%d",
+				handler.Name, len(reqCtx.reqBody))
 			h.writeContextLengthError(c, handler, len(reqCtx.reqBody))
 			return
 		}
