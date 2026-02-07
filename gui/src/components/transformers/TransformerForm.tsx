@@ -9,7 +9,7 @@ import {
   ResizableDialogTitle,
 } from '../ui/resizable-dialog'
 import { Input, Checkbox, Button, Select } from '../ui/dialog'
-import { useTransformerStore, TransformerDef, ParamMapping } from '../../store/transformer-store'
+import { useTransformerStore, TransformerDef, ParamMapping, HeaderInjection } from '../../store/transformer-store'
 import { useConnectionStore } from '../../store/connection-store'
 
 interface TransformerFormProps {
@@ -20,6 +20,10 @@ interface TransformerFormProps {
 
 function createEmptyParamMapping(): ParamMapping {
   return { from: '', to: '', transform: '' }
+}
+
+function createEmptyHeaderInjection(): HeaderInjection {
+  return { key: '', value: '' }
 }
 
 function extractTemplateParams(template: TransformerDef): string[] {
@@ -45,11 +49,28 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [type, setType] = useState<'tool' | 'message_inject' | 'error_transform' | 'header_inject'>('tool')
   const [direction, setDirection] = useState<'request' | 'response'>('response')
+  
+  // Tool transform fields
   const [sourceTool, setSourceTool] = useState('')
   const [targetTool, setTargetTool] = useState('')
   const [accumulate, setAccumulate] = useState(false)
   const [paramMapping, setParamMapping] = useState<ParamMapping[]>([])
+  
+  // Message inject fields
+  const [injectText, setInjectText] = useState('')
+  const [injectFormat, setInjectFormat] = useState<'system-reminder' | 'plain'>('system-reminder')
+  
+  // Error transform fields
+  const [errorCode, setErrorCode] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
+  const [requestSizeThreshold, setRequestSizeThreshold] = useState(500000)
+  const [contextTokenLimit, setContextTokenLimit] = useState(200000)
+  const [contextThresholdRatio, setContextThresholdRatio] = useState(0.85)
+  
+  // Common fields
+  const [headerInjections, setHeaderInjections] = useState<HeaderInjection[]>([])
   const [isTemplate, setIsTemplate] = useState(false)
   const [templateArgs, setTemplateArgs] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -68,41 +89,89 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
     if (definition) {
       setName(definition.name)
       setDescription(definition.description || '')
+      setType(definition.type || 'tool')
       setDirection(definition.direction)
-      setSourceTool(definition.source_tool)
-      setTargetTool(definition.target_tool)
-      setAccumulate(definition.accumulate)
+      
+      // Tool fields
+      setSourceTool(definition.source_tool || '')
+      setTargetTool(definition.target_tool || '')
+      setAccumulate(definition.accumulate || false)
       setParamMapping(definition.param_mapping?.length > 0 ? definition.param_mapping : [])
+      
+      // Message inject fields
+      setInjectText(definition.inject_text || '')
+      setInjectFormat(definition.inject_format || 'system-reminder')
+      
+      // Error transform fields
+      setErrorCode(definition.error_code || '')
+      setErrorMessage(definition.error_message || '')
+      setRequestSizeThreshold(definition.request_size_threshold || 500000)
+      setContextTokenLimit(definition.context_token_limit || 200000)
+      setContextThresholdRatio(definition.context_threshold_ratio || 0.85)
+      
+      // Common fields
+      setHeaderInjections(definition.header_injections && definition.header_injections.length > 0 ? definition.header_injections : [])
       setIsTemplate(definition.is_template || false)
       setTemplateArgs({})
     } else if (selectedTemplate) {
       setName('')
       setDescription('')
+      setType('tool')
       setDirection('response')
       setSourceTool('')
       setTargetTool('')
       setAccumulate(selectedTemplate.accumulate || false)
       setParamMapping(selectedTemplate.param_mapping?.length > 0 ? [...selectedTemplate.param_mapping] : [])
+      setInjectText('')
+      setInjectFormat('system-reminder')
+      setErrorCode('')
+      setErrorMessage('')
+      setRequestSizeThreshold(500000)
+      setContextTokenLimit(200000)
+      setContextThresholdRatio(0.85)
+      setHeaderInjections([])
       setIsTemplate(false)
       setTemplateArgs({})
     } else {
       setName('')
       setDescription('')
+      setType('tool')
       setDirection('response')
       setSourceTool('')
       setTargetTool('')
       setAccumulate(false)
       setParamMapping([])
+      setInjectText('')
+      setInjectFormat('system-reminder')
+      setErrorCode('')
+      setErrorMessage('')
+      setRequestSizeThreshold(500000)
+      setContextTokenLimit(200000)
+      setContextThresholdRatio(0.85)
+      setHeaderInjections([])
       setIsTemplate(false)
       setTemplateArgs({})
     }
   }, [definition, selectedTemplate, open])
+
+  // Adjust direction defaults when type changes
+  useEffect(() => {
+    if (type === 'message_inject') {
+      setDirection('request')
+    } else if (type === 'error_transform') {
+      setDirection('response')
+    } else if (type === 'header_inject' && !definition) {
+      // Default to request for header_inject when creating new
+      setDirection('request')
+    }
+  }, [type, definition])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
 
     const validParamMapping = paramMapping.filter((pm) => pm.from && pm.to)
+    const validHeaderInjections = headerInjections.filter((h) => h.key && h.value)
 
     let newDef: TransformerDef
 
@@ -110,11 +179,13 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
       newDef = {
         name,
         description: description || undefined,
+        type: 'tool',
         direction: 'response',
         source_tool: '',
         target_tool: '',
         accumulate: selectedTemplate.accumulate || false,
         param_mapping: validParamMapping,
+        header_injections: validHeaderInjections.length > 0 ? validHeaderInjections : undefined,
         builtin: false,
         template_ref: selectedTemplate.name,
         template_args: templateArgs,
@@ -123,24 +194,52 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
       newDef = {
         name,
         description: description || undefined,
+        type: 'tool',
         direction: direction as 'request' | 'response',
         source_tool: sourceTool,
         target_tool: targetTool,
         accumulate,
         param_mapping: validParamMapping,
+        header_injections: validHeaderInjections.length > 0 ? validHeaderInjections : undefined,
         builtin: false,
         is_template: true,
       }
     } else {
+      // Normal transformer creation based on type
       newDef = {
         name,
         description: description || undefined,
+        type: type || 'tool',
         direction,
-        source_tool: sourceTool,
-        target_tool: targetTool,
-        accumulate,
-        param_mapping: validParamMapping,
+        accumulate: false,
+        param_mapping: [],
         builtin: false,
+      }
+
+      // Add type-specific fields
+      if (type === 'tool') {
+        newDef.source_tool = sourceTool
+        newDef.target_tool = targetTool
+        newDef.accumulate = accumulate
+        newDef.param_mapping = validParamMapping
+      } else if (type === 'message_inject') {
+        newDef.direction = 'request'
+        newDef.inject_text = injectText
+        newDef.inject_format = injectFormat
+      } else if (type === 'error_transform') {
+        newDef.direction = 'response'
+        newDef.error_code = errorCode
+        newDef.error_message = errorMessage
+        newDef.request_size_threshold = requestSizeThreshold
+        newDef.context_token_limit = contextTokenLimit
+        newDef.context_threshold_ratio = contextThresholdRatio
+      } else if (type === 'header_inject') {
+        // No tool-specific fields, only direction and header_injections
+      }
+
+      // Add header injections (common to all types)
+      if (validHeaderInjections.length > 0) {
+        newDef.header_injections = validHeaderInjections
       }
     }
 
@@ -171,6 +270,22 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
 
   const removeParamMapping = (index: number) => {
     setParamMapping((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const updateHeaderInjection = (index: number, updates: Partial<HeaderInjection>) => {
+    setHeaderInjections((prev) => {
+      const newHeaders = [...prev]
+      newHeaders[index] = { ...newHeaders[index], ...updates }
+      return newHeaders
+    })
+  }
+
+  const addHeaderInjection = () => {
+    setHeaderInjections((prev) => [...prev, createEmptyHeaderInjection()])
+  }
+
+  const removeHeaderInjection = (index: number) => {
+    setHeaderInjections((prev) => prev.filter((_, i) => i !== index))
   }
 
   const updateTemplateArg = (key: string, value: string) => {
@@ -255,14 +370,17 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
                     disabled={isEditing}
                   />
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium">Direction</label>
+                    <label className="mb-1.5 block text-sm font-medium">Type</label>
                     <Select
-                      value={direction}
-                      onChange={(e) => setDirection(e.target.value as 'request' | 'response')}
+                      value={type}
+                      onChange={(e) => setType(e.target.value as 'tool' | 'message_inject' | 'error_transform' | 'header_inject')}
                       className="w-full"
+                      disabled={isEditing}
                     >
-                      <option value="response">Response</option>
-                      <option value="request">Request</option>
+                      <option value="tool">Tool Transform</option>
+                      <option value="message_inject">Message Inject</option>
+                      <option value="error_transform">Error Transform</option>
+                      <option value="header_inject">Header Inject</option>
                     </Select>
                   </div>
                 </div>
@@ -274,43 +392,199 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
                   placeholder="Optional description"
                 />
 
-                <div className="grid grid-cols-2 gap-4">
-                  <Input
-                    label={isTemplate ? "Source Tool (use {{source}})" : "Source Tool"}
-                    value={sourceTool}
-                    onChange={(e) => setSourceTool(e.target.value)}
-                    placeholder={isTemplate ? "{{source}}" : "source_tool_name"}
-                    required
-                  />
-                  <Input
-                    label={isTemplate ? "Target Tool (use {{target}})" : "Target Tool"}
-                    value={targetTool}
-                    onChange={(e) => setTargetTool(e.target.value)}
-                    placeholder={isTemplate ? "{{target}}" : "target_tool_name"}
-                    required
-                  />
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium">Direction</label>
+                  <Select
+                    value={direction}
+                    onChange={(e) => setDirection(e.target.value as 'request' | 'response')}
+                    className="w-full"
+                    disabled={type === 'message_inject' || type === 'error_transform'}
+                  >
+                    <option value="request">Request</option>
+                    <option value="response">Response</option>
+                  </Select>
+                  {type === 'message_inject' && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Message inject only supports request direction
+                    </p>
+                  )}
+                  {type === 'error_transform' && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Error transform only supports response direction
+                    </p>
+                  )}
                 </div>
 
-                {!isEditing && (
-                  <Checkbox
-                    label="Create as Template (use {{param}} placeholders)"
-                    checked={isTemplate}
-                    onChange={setIsTemplate}
-                  />
+                {/* === Type: tool 专用字段 === */}
+                {type === 'tool' && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <Input
+                        label="Source Tool"
+                        value={sourceTool}
+                        onChange={(e) => setSourceTool(e.target.value)}
+                        placeholder="source_tool_name (empty = match all)"
+                        required={false}
+                      />
+                      <Input
+                        label="Target Tool"
+                        value={targetTool}
+                        onChange={(e) => setTargetTool(e.target.value)}
+                        placeholder="target_tool_name (empty = no transform)"
+                        required={false}
+                      />
+                    </div>
+
+                    {direction === 'response' && (
+                      <Checkbox
+                        label="Accumulate (for streaming responses)"
+                        checked={accumulate}
+                        onChange={setAccumulate}
+                      />
+                    )}
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="text-sm font-medium">Parameter Mappings</label>
+                        <button
+                          type="button"
+                          onClick={addParamMapping}
+                          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                        >
+                          <Plus className="h-3 w-3" /> Add Mapping
+                        </button>
+                      </div>
+                      {paramMapping.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          No parameter mappings. Click "Add Mapping" to define how parameters are transformed.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {paramMapping.map((pm, index) => (
+                            <div key={index} className="rounded-md border bg-muted/30 p-3">
+                              <div className="flex items-start gap-2">
+                                <div className="flex-1 space-y-2">
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <input
+                                      type="text"
+                                      value={pm.from}
+                                      onChange={(e) => updateParamMapping(index, { from: e.target.value })}
+                                      className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                      placeholder="from (e.g., content)"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={pm.to}
+                                      onChange={(e) => updateParamMapping(index, { to: e.target.value })}
+                                      className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                      placeholder="to (e.g., plan)"
+                                    />
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={pm.transform || ''}
+                                    onChange={(e) => updateParamMapping(index, { transform: e.target.value })}
+                                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                    placeholder="transform (optional, e.g., string_to_array)"
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => removeParamMapping(index)}
+                                  className="rounded p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-500"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
                 )}
 
-                {isTemplate && (
-                  <p className="text-xs text-muted-foreground">
-                    Use {"{{direction}}"}, {"{{source}}"}, {"{{target}}"} as placeholders in the fields above.
-                  </p>
+                {/* === Type: message_inject 专用字段 === */}
+                {type === 'message_inject' && (
+                  <>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium">Inject Text</label>
+                      <textarea
+                        value={injectText}
+                        onChange={(e) => setInjectText(e.target.value)}
+                        className="w-full min-h-[100px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        placeholder="Text to inject into request messages. Supports {{tool}} placeholder."
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium">Inject Format</label>
+                      <Select
+                        value={injectFormat}
+                        onChange={(e) => setInjectFormat(e.target.value as 'system-reminder' | 'plain')}
+                        className="w-full"
+                      >
+                        <option value="system-reminder">System Reminder (wrapped in tags)</option>
+                        <option value="plain">Plain Text</option>
+                      </Select>
+                    </div>
+                  </>
                 )}
 
-                {direction === 'response' && !isTemplate && (
-                  <Checkbox
-                    label="Accumulate (for streaming responses)"
-                    checked={accumulate}
-                    onChange={setAccumulate}
-                  />
+                {/* === Type: error_transform 专用字段 === */}
+                {type === 'error_transform' && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <Input
+                        label="Error Code"
+                        value={errorCode}
+                        onChange={(e) => setErrorCode(e.target.value)}
+                        placeholder="e.g., context_length_exceeded"
+                        required
+                      />
+                      <Input
+                        label="Request Size Threshold (bytes)"
+                        type="number"
+                        value={requestSizeThreshold.toString()}
+                        onChange={(e) => setRequestSizeThreshold(Number(e.target.value))}
+                        placeholder="500000"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium">Error Message</label>
+                      <textarea
+                        value={errorMessage}
+                        onChange={(e) => setErrorMessage(e.target.value)}
+                        className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        placeholder="Error message to return"
+                        required
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <Input
+                        label="Context Token Limit"
+                        type="number"
+                        value={contextTokenLimit.toString()}
+                        onChange={(e) => setContextTokenLimit(Number(e.target.value))}
+                        placeholder="200000"
+                      />
+                      <Input
+                        label="Context Threshold Ratio"
+                        type="number"
+                        step="0.01"
+                        value={contextThresholdRatio.toString()}
+                        onChange={(e) => setContextThresholdRatio(Number(e.target.value))}
+                        placeholder="0.85"
+                      />
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Advanced fields (model_context_limits, token_estimate_ratio, param_conditions) can be configured via YAML.
+                    </p>
+                  </>
                 )}
 
                 {!isTemplate && (
@@ -371,6 +645,61 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
                         ))}
                       </div>
                     )}
+                  </div>
+                )}
+
+                {!isTemplate && (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <label className="text-sm font-medium">Header Injections</label>
+                      <button
+                        type="button"
+                        onClick={addHeaderInjection}
+                        className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                      >
+                        <Plus className="h-3 w-3" /> Add Header
+                      </button>
+                    </div>
+                    {headerInjections.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No custom headers. Click "Add Header" to inject HTTP headers.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {headerInjections.map((header, index) => (
+                          <div key={index} className="rounded-md border bg-muted/30 p-3">
+                            <div className="flex items-start gap-2">
+                              <div className="flex-1 grid grid-cols-2 gap-2">
+                                <input
+                                  type="text"
+                                  value={header.key}
+                                  onChange={(e) => updateHeaderInjection(index, { key: e.target.value })}
+                                  className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                  placeholder="Header name (e.g., X-Custom-Agent)"
+                                />
+                                <input
+                                  type="text"
+                                  value={header.value}
+                                  onChange={(e) => updateHeaderInjection(index, { value: e.target.value })}
+                                  className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                  placeholder="Header value (supports {{placeholders}})"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeHeaderInjection(index)}
+                                className="rounded p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-500"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Supported placeholders: {"{{session_id}}"}, {"{{request_id}}"}, {"{{gateway}}"}
+                    </p>
                   </div>
                 )}
               </>

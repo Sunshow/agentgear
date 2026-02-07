@@ -285,6 +285,9 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 		}
 	}
 
+	// Apply request header injections from transformers
+	h.applyRequestHeaderInjections(proxyReq, tags, reqCtx)
+
 	isStreaming := h.isStreamingRequest(reqBody)
 
 	if isStreaming {
@@ -728,6 +731,144 @@ func (h *Handler) injectMessage(req map[string]interface{}, text string, format 
 	return false
 }
 
+// applyRequestHeaderInjections applies header injections from request transformers
+func (h *Handler) applyRequestHeaderInjections(proxyReq *http.Request, tags []string, reqCtx *requestContext) {
+	if h.transformerRegistry == nil {
+		return
+	}
+
+	// Get header_inject type transformers
+	headerInjectTransformers := h.transformerRegistry.GetHeaderInjectTransformers("request", tags)
+	for _, def := range headerInjectTransformers {
+		for _, header := range def.HeaderInjections {
+			value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
+			proxyReq.Header.Set(header.Key, value)
+			h.logger.Debug("injected request header",
+				zap.String("transformer", def.Name),
+				zap.String("key", header.Key),
+				zap.String("value", value))
+		}
+		if reqCtx.appliedTransformers == nil {
+			reqCtx.appliedTransformers = []string{}
+		}
+		reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, def.Name)
+	}
+
+	// Also support header_injections in other transformer types (backward compatibility)
+	mappings := h.transformerRegistry.GetMappings()
+	definitions := h.transformerRegistry.GetDefinitions()
+
+	for _, mapping := range mappings {
+		if !mapping.Enabled {
+			continue
+		}
+		if !h.matchMappingTags(mapping.Tags, tags) {
+			continue
+		}
+
+		// Find the transformer definition
+		for _, def := range definitions {
+			if def.Name == mapping.Transformer && def.Direction == "request" && def.Type != "header_inject" && len(def.HeaderInjections) > 0 {
+				for _, header := range def.HeaderInjections {
+					value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
+					proxyReq.Header.Set(header.Key, value)
+					h.logger.Debug("injected request header",
+						zap.String("transformer", def.Name),
+						zap.String("key", header.Key),
+						zap.String("value", value))
+				}
+				if reqCtx.appliedTransformers == nil {
+					reqCtx.appliedTransformers = []string{}
+				}
+				reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, def.Name)
+			}
+		}
+	}
+}
+
+// applyResponseHeaderInjections applies header injections from response transformers
+func (h *Handler) applyResponseHeaderInjections(c *gin.Context, tags []string, reqCtx *requestContext) {
+	if h.transformerRegistry == nil {
+		return
+	}
+
+	// Get header_inject type transformers
+	headerInjectTransformers := h.transformerRegistry.GetHeaderInjectTransformers("response", tags)
+	for _, def := range headerInjectTransformers {
+		for _, header := range def.HeaderInjections {
+			value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
+			c.Header(header.Key, value)
+			h.logger.Debug("injected response header",
+				zap.String("transformer", def.Name),
+				zap.String("key", header.Key),
+				zap.String("value", value))
+		}
+		if reqCtx.appliedTransformers == nil {
+			reqCtx.appliedTransformers = []string{}
+		}
+		reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, def.Name)
+	}
+
+	// Also support header_injections in other transformer types (backward compatibility)
+	mappings := h.transformerRegistry.GetMappings()
+	definitions := h.transformerRegistry.GetDefinitions()
+
+	for _, mapping := range mappings {
+		if !mapping.Enabled {
+			continue
+		}
+		if !h.matchMappingTags(mapping.Tags, tags) {
+			continue
+		}
+
+		// Find the transformer definition
+		for _, def := range definitions {
+			if def.Name == mapping.Transformer && def.Direction == "response" && def.Type != "header_inject" && len(def.HeaderInjections) > 0 {
+				for _, header := range def.HeaderInjections {
+					value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
+					c.Header(header.Key, value)
+					h.logger.Debug("injected response header",
+						zap.String("transformer", def.Name),
+						zap.String("key", header.Key),
+						zap.String("value", value))
+				}
+				if reqCtx.appliedTransformers == nil {
+					reqCtx.appliedTransformers = []string{}
+				}
+				reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, def.Name)
+			}
+		}
+	}
+}
+
+// matchMappingTags checks if all mapping tags are present in request tags
+func (h *Handler) matchMappingTags(mappingTags, requestTags []string) bool {
+	if len(mappingTags) == 0 {
+		return true
+	}
+
+	tagSet := make(map[string]bool)
+	for _, t := range requestTags {
+		tagSet[t] = true
+	}
+
+	for _, t := range mappingTags {
+		if !tagSet[t] {
+			return false
+		}
+	}
+	return true
+}
+
+// replaceHeaderPlaceholders replaces placeholders in header values
+func (h *Handler) replaceHeaderPlaceholders(value string, reqCtx *requestContext) string {
+	result := value
+	result = strings.ReplaceAll(result, "{{session_id}}", reqCtx.meta.SessionID)
+	result = strings.ReplaceAll(result, "{{request_id}}", reqCtx.meta.ID)
+	result = strings.ReplaceAll(result, "{{gateway}}", h.gatewayName)
+	return result
+}
+
 func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, reqCtx *requestContext, startTime time.Time) {
 	resp, err := h.httpClient.Do(proxyReq)
 	if err != nil {
@@ -795,6 +936,10 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 			c.Header(key, value)
 		}
 	}
+
+	// Apply response header injections
+	h.applyResponseHeaderInjections(c, reqCtx.tags, reqCtx)
+
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 }
 
@@ -861,6 +1006,10 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 				c.Header(key, value)
 			}
 		}
+
+		// Apply response header injections
+		h.applyResponseHeaderInjections(c, reqCtx.tags, reqCtx)
+
 		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 		return
 	}
@@ -938,6 +1087,9 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 			c.Header(key, value)
 		}
 	}
+
+	// Apply response header injections for streaming
+	h.applyResponseHeaderInjections(c, reqCtx.tags, reqCtx)
 
 	c.Status(resp.StatusCode)
 	c.Writer.Header().Set("Content-Type", "text/event-stream")

@@ -7,14 +7,51 @@ export interface ParamMapping {
   transform?: string
 }
 
+export interface HeaderInjection {
+  key: string
+  value: string
+}
+
+export interface ModelContextLimit {
+  model_pattern: string
+  token_limit: number
+}
+
+export interface ParamCondition {
+  param: string
+  op: 'prefix' | 'suffix' | 'contains' | 'equals'
+  value: string
+}
+
 export interface TransformerDef {
   name: string
   description?: string
   direction: 'request' | 'response'
-  source_tool: string
-  target_tool: string
+  type?: 'tool' | 'message_inject' | 'error_transform' | 'header_inject'
+  
+  // Tool transform fields
+  source_tool?: string
+  target_tool?: string
   accumulate: boolean
   param_mapping: ParamMapping[]
+  input_schema?: Record<string, any>
+  
+  // Message inject fields
+  inject_text?: string
+  inject_format?: 'system-reminder' | 'plain'
+  
+  // Error transform fields
+  error_code?: string
+  error_message?: string
+  request_size_threshold?: number
+  context_token_limit?: number
+  model_context_limits?: ModelContextLimit[]
+  context_threshold_ratio?: number
+  token_estimate_ratio?: number
+  param_conditions?: ParamCondition[]
+  
+  // Common fields
+  header_injections?: HeaderInjection[]
   builtin: boolean
   is_template?: boolean
   template_ref?: string

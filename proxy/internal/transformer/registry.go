@@ -579,3 +579,31 @@ func (r *Registry) GetErrorTransformer(tags []string) *TransformerDef {
 	}
 	return nil
 }
+
+// GetHeaderInjectTransformers returns all header_inject type transformers that match the given direction and tags
+func (r *Registry) GetHeaderInjectTransformers(direction string, tags []string) []*TransformerDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*TransformerDef
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, tags) {
+			continue
+		}
+		// Find the referenced definition
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Type == "header_inject" && d.Direction == direction {
+				result = append(result, d)
+				break
+			}
+		}
+	}
+
+	return result
+}

@@ -19,12 +19,18 @@ type ModelContextLimit struct {
 	TokenLimit   int    `mapstructure:"token_limit" json:"token_limit" yaml:"token_limit"`       // 该模型的 token 限制
 }
 
+// HeaderInjection defines a custom HTTP header to inject
+type HeaderInjection struct {
+	Key   string `mapstructure:"key" json:"key" yaml:"key"`       // Header name (e.g., "X-Custom-Agent")
+	Value string `mapstructure:"value" json:"value" yaml:"value"` // Header value (supports {{placeholders}})
+}
+
 // TransformerDef defines a transformer's logic (source tool -> target tool mapping)
 type TransformerDef struct {
 	Name         string                 `mapstructure:"name" json:"name" yaml:"name"`
 	Description  string                 `mapstructure:"description" json:"description,omitempty" yaml:"description,omitempty"`
 	Direction    string                 `mapstructure:"direction" json:"direction,omitempty" yaml:"direction,omitempty"` // "request" or "response"
-	Type         string                 `mapstructure:"type" json:"type,omitempty" yaml:"type,omitempty"`                // "tool" (默认) | "message_inject"
+	Type         string                 `mapstructure:"type" json:"type,omitempty" yaml:"type,omitempty"`                // "tool" (默认) | "message_inject" | "error_transform" | "header_inject"
 	SourceTool   string                 `mapstructure:"source_tool" json:"source_tool,omitempty" yaml:"source_tool,omitempty"`
 	TargetTool   string                 `mapstructure:"target_tool" json:"target_tool,omitempty" yaml:"target_tool,omitempty"`
 	Accumulate   bool                   `mapstructure:"accumulate" json:"accumulate" yaml:"accumulate"`
@@ -41,6 +47,7 @@ type TransformerDef struct {
 	ContextThresholdRatio float64              `mapstructure:"context_threshold_ratio" json:"context_threshold_ratio,omitempty" yaml:"context_threshold_ratio,omitempty"`
 	TokenEstimateRatio    float64              `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
 	ParamConditions       []ParamCondition     `mapstructure:"param_conditions" json:"param_conditions,omitempty" yaml:"param_conditions,omitempty"`
+	HeaderInjections      []HeaderInjection    `mapstructure:"header_injections" json:"header_injections,omitempty" yaml:"header_injections,omitempty"`
 	Builtin              bool   `mapstructure:"builtin" json:"builtin" yaml:"builtin,omitempty"`
 	IsTemplate   bool                   `mapstructure:"is_template" json:"is_template,omitempty" yaml:"is_template,omitempty"`
 	TemplateRef  string                 `mapstructure:"template_ref" json:"template_ref,omitempty" yaml:"template_ref,omitempty"`

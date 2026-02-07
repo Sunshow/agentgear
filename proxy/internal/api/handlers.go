@@ -310,12 +310,52 @@ func (s *Server) createDefinition(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "direction must be 'request' or 'response'"})
 		return
 	}
-	if def.SourceTool == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "source_tool is required"})
-		return
+
+	// Validate type-specific required fields
+	defType := def.Type
+	if defType == "" {
+		defType = "tool" // Default type
 	}
-	if def.TargetTool == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "target_tool is required"})
+
+	switch defType {
+	case "tool":
+		if def.SourceTool == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "source_tool is required for tool type"})
+			return
+		}
+		if def.TargetTool == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "target_tool is required for tool type"})
+			return
+		}
+	case "message_inject":
+		if def.InjectText == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "inject_text is required for message_inject type"})
+			return
+		}
+		if def.Direction != "request" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "message_inject only supports request direction"})
+			return
+		}
+	case "error_transform":
+		if def.ErrorCode == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "error_code is required for error_transform type"})
+			return
+		}
+		if def.ErrorMessage == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "error_message is required for error_transform type"})
+			return
+		}
+		if def.Direction != "response" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "error_transform only supports response direction"})
+			return
+		}
+	case "header_inject":
+		if len(def.HeaderInjections) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "header_injections is required for header_inject type"})
+			return
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid type, must be: tool, message_inject, error_transform, or header_inject"})
 		return
 	}
 
@@ -343,6 +383,54 @@ func (s *Server) updateDefinition(c *gin.Context) {
 
 	if def.Name == "" {
 		def.Name = name
+	}
+
+	// Validate type-specific required fields
+	defType := def.Type
+	if defType == "" {
+		defType = "tool" // Default type
+	}
+
+	switch defType {
+	case "tool":
+		if def.SourceTool == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "source_tool is required for tool type"})
+			return
+		}
+		if def.TargetTool == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "target_tool is required for tool type"})
+			return
+		}
+	case "message_inject":
+		if def.InjectText == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "inject_text is required for message_inject type"})
+			return
+		}
+		if def.Direction != "request" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "message_inject only supports request direction"})
+			return
+		}
+	case "error_transform":
+		if def.ErrorCode == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "error_code is required for error_transform type"})
+			return
+		}
+		if def.ErrorMessage == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "error_message is required for error_transform type"})
+			return
+		}
+		if def.Direction != "response" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "error_transform only supports response direction"})
+			return
+		}
+	case "header_inject":
+		if len(def.HeaderInjections) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "header_injections is required for header_inject type"})
+			return
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid type, must be: tool, message_inject, error_transform, or header_inject"})
+		return
 	}
 
 	if err := s.transformer.UpdateDefinition(name, def); err != nil {

@@ -148,11 +148,12 @@ tagging:
 transformers:
   # Transformer definitions
   definitions:
+    # === Type: tool (工具转换) ===
     # Example: Transform create_documents to ExitSpecMode (for Droid compatibility)
     # - name: "create_documents_to_ExitSpecMode"
     #   description: "Convert create_documents tool call to ExitSpecMode"
-    #   direction: "response"           # "request" or "response"
     #   type: "tool"                    # "tool" (default) | "message_inject" | "error_transform"
+    #   direction: "response"           # "request" or "response"
     #   source_tool: "create_documents"
     #   target_tool: "ExitSpecMode"
     #   accumulate: true                # Accumulate streaming deltas before transform
@@ -161,19 +162,37 @@ transformers:
     #       to: "plan"
     #       transform: ""               # Optional: transformation function
 
+    # === Type: tool (纯 Header 注入) ===
+    # - name: "add_headers_all_tools"
+    #   description: "Add headers to all requests"
+    #   type: "tool"
+    #   direction: "request"
+    #   source_tool: ""                 # Empty = match all tools
+    #   target_tool: ""                 # Empty = no tool name transform
+    #   header_injections:
+    #     - key: "X-Agent-Type"
+    #       value: "Droid"
+    #     - key: "X-Session-Context"
+    #       value: "{{session_id}}"     # Supports {{session_id}}, {{request_id}}, {{gateway}}
+
+    # === Type: message_inject (消息注入) ===
     # Example: Message injection transformer
     # - name: "inject_system_reminder"
     #   description: "Inject system reminder into request"
-    #   direction: "request"
     #   type: "message_inject"
+    #   direction: "request"            # message_inject only supports "request"
     #   inject_text: "Remember to follow the guidelines."
     #   inject_format: "system-reminder"  # "system-reminder" | "plain"
+    #   header_injections:              # Optional: can also inject headers
+    #     - key: "X-Message-Injected"
+    #       value: "true"
 
+    # === Type: error_transform (错误转换) ===
     # Example: Error transform with model-specific context limits
     # - name: "kiro_context_check"
     #   description: "Context limit check with model-specific thresholds"
-    #   direction: "response"
     #   type: "error_transform"
+    #   direction: "response"           # error_transform only supports "response"
     #   error_code: "context_length_exceeded"
     #   error_message: "prompt is too long: request size exceeds limit"
     #   request_size_threshold: 500000
@@ -185,6 +204,20 @@ transformers:
     #       token_limit: 1000000
     #   context_threshold_ratio: 0.85  # Trigger at 85% of limit
     #   token_estimate_ratio: 3.5      # Bytes to tokens estimation ratio
+
+    # === Type: header_inject (Header 注入) ===
+    # Example: Header injection transformer
+    # - name: "inject_custom_agent_header"
+    #   description: "Inject custom agent header to upstream"
+    #   type: "header_inject"
+    #   direction: "request"            # Can be "request" or "response"
+    #   header_injections:
+    #     - key: "X-Custom-Agent"
+    #       value: "AgentGear/{{gateway}}"
+    #     - key: "X-Request-Id"
+    #       value: "{{request_id}}"
+    #     - key: "X-Session-Id"
+    #       value: "{{session_id}}"     # Supports {{session_id}}, {{request_id}}, {{gateway}}
 
   # Mapping rules (bind transformers to conditions)
   mappings:
