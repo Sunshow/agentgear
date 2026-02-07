@@ -482,10 +482,11 @@ func (h *Handler) shouldTransformToContextError(reqCtx *requestContext, respStat
 		return nil
 	}
 
+	log.Printf("[ERROR_TRANSFORM] Request size info: transformer=%s request_size=%d threshold=%d response_status=%d response_body_len=%d",
+		handler.Name, len(reqCtx.reqBody), handler.RequestSizeThreshold, respStatus, respBodyLen)
+
 	// 检查请求大小是否超过阈值
 	if handler.RequestSizeThreshold > 0 && len(reqCtx.reqBody) >= handler.RequestSizeThreshold {
-		log.Printf("[ERROR_TRANSFORM] Response size threshold matched: transformer=%s request_size=%d threshold=%d response_status=%d response_body_len=%d",
-			handler.Name, len(reqCtx.reqBody), handler.RequestSizeThreshold, respStatus, respBodyLen)
 		return handler
 	}
 
