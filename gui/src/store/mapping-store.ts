@@ -7,6 +7,8 @@ export interface MappingRule {
   enabled: boolean
   tags: string[]
   gateways: string[]
+  tools?: string[]
+  tool_op?: string
   transformer: string
   builtin: boolean
 }

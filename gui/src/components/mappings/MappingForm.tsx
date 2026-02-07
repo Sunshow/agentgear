@@ -75,6 +75,8 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
   const [enabled, setEnabled] = useState(true)
   const [tags, setTags] = useState<string[]>([])
   const [selectedGateways, setSelectedGateways] = useState<string[]>([])
+  const [tools, setTools] = useState<string[]>([])
+  const [toolOp, setToolOp] = useState<'all' | 'any'>('all')
   const [transformer, setTransformer] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -113,6 +115,8 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
       setEnabled(mapping.enabled)
       setTags(mapping.tags || [])
       setSelectedGateways(mapping.gateways || [])
+      setTools(mapping.tools || [])
+      setToolOp((mapping.tool_op as 'all' | 'any') || 'all')
       setTransformer(mapping.transformer)
     } else {
       setName('')
@@ -120,6 +124,8 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
       setEnabled(true)
       setTags([])
       setSelectedGateways([])
+      setTools([])
+      setToolOp('all')
       setTransformer(prefilledTransformer || '')
     }
   }, [mapping, open, prefilledTransformer])
@@ -134,6 +140,8 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
       enabled,
       tags,
       gateways: selectedGateways,
+      tools: tools.length > 0 ? tools : undefined,
+      tool_op: tools.length > 0 ? toolOp : undefined,
       transformer,
       builtin: false,
     }
@@ -231,6 +239,39 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
                 Leave empty to match all gateways
               </p>
             </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">Tools (conditions)</label>
+              <CreatableSelect<SelectOption, true>
+                isMulti
+                isClearable
+                options={[]}
+                value={tools.map((t) => ({ value: t, label: t }))}
+                onChange={(opts) => setTools(opts.map((o) => o.value))}
+                onCreateOption={(inputValue) => setTools([...tools, inputValue])}
+                placeholder="Select or type tool names..."
+                classNames={selectClassNames}
+                components={{ Option: CustomOption }}
+                unstyled
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Leave empty to match all tools
+              </p>
+            </div>
+
+            {tools.length > 0 && (
+              <div>
+                <label className="mb-1.5 block text-sm font-medium">Tool Match Mode</label>
+                <Select
+                  value={toolOp}
+                  onChange={(e) => setToolOp(e.target.value as 'all' | 'any')}
+                  className="w-full"
+                >
+                  <option value="all">All (must match all specified tools)</option>
+                  <option value="any">Any (match any of the specified tools)</option>
+                </Select>
+              </div>
+            )}
 
             {error && <p className="text-sm text-red-500">{error}</p>}
           </form>

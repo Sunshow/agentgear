@@ -233,6 +233,21 @@ function MappingCard({ mapping, onEdit, onDelete }: MappingCardProps) {
             </div>
           </div>
         )}
+        {mapping.tools && mapping.tools.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground text-xs">Tools ({mapping.tool_op || 'all'}):</span>
+            <div className="flex flex-wrap gap-1">
+              {mapping.tools.map((tool) => (
+                <span
+                  key={tool}
+                  className="rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-600 dark:text-amber-400 font-mono"
+                >
+                  {tool}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
