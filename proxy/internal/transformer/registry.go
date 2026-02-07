@@ -2,6 +2,7 @@ package transformer
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -606,4 +607,38 @@ func (r *Registry) GetHeaderInjectTransformers(direction string, tags []string) 
 	}
 
 	return result
+}
+
+// GetErrorPatternTransformer returns the first error_transform transformer with ErrorPatterns that matches
+// the given tags and whose patterns match the response body content
+func (r *Registry) GetErrorPatternTransformer(tags []string, respBody string) *TransformerDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, tags) {
+			continue
+		}
+		// Find the referenced definition
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Type == "error_transform" && len(d.ErrorPatterns) > 0 {
+				// Check if any pattern matches the response body
+				for _, pattern := range d.ErrorPatterns {
+					re, err := regexp.Compile(pattern)
+					if err != nil {
+						continue
+					}
+					if re.MatchString(respBody) {
+						return d
+					}
+				}
+			}
+		}
+	}
+	return nil
 }

@@ -8,9 +8,9 @@ type ParamMapping struct {
 
 // ParamCondition defines a condition for matching tool parameters
 type ParamCondition struct {
-	Param string `mapstructure:"param" json:"param" yaml:"param"`    // 参数路径，如 "file_path"
-	Op    string `mapstructure:"op" json:"op" yaml:"op"`             // 操作符: prefix, suffix, contains, equals
-	Value string `mapstructure:"value" json:"value" yaml:"value"`    // 匹配值
+	Param string `mapstructure:"param" json:"param" yaml:"param"` // 参数路径，如 "file_path"
+	Op    string `mapstructure:"op" json:"op" yaml:"op"`          // 操作符: prefix, suffix, contains, equals
+	Value string `mapstructure:"value" json:"value" yaml:"value"` // 匹配值
 }
 
 // ModelContextLimit defines model-specific context token limits
@@ -35,23 +35,24 @@ type TransformerDef struct {
 	TargetTool   string                 `mapstructure:"target_tool" json:"target_tool,omitempty" yaml:"target_tool,omitempty"`
 	Accumulate   bool                   `mapstructure:"accumulate" json:"accumulate" yaml:"accumulate"`
 	ParamMapping []ParamMapping         `mapstructure:"param_mapping" json:"param_mapping" yaml:"param_mapping"`
-	InputSchema  map[string]interface{} `mapstructure:"input_schema" json:"input_schema,omitempty" yaml:"input_schema,omitempty"` // 请求方向：替换工具的 input_schema
-	InjectText   string                 `mapstructure:"inject_text" json:"inject_text,omitempty" yaml:"inject_text,omitempty"`     // 注入的文本内容
+	InputSchema  map[string]interface{} `mapstructure:"input_schema" json:"input_schema,omitempty" yaml:"input_schema,omitempty"`    // 请求方向：替换工具的 input_schema
+	InjectText   string                 `mapstructure:"inject_text" json:"inject_text,omitempty" yaml:"inject_text,omitempty"`       // 注入的文本内容
 	InjectFormat string                 `mapstructure:"inject_format" json:"inject_format,omitempty" yaml:"inject_format,omitempty"` // "system-reminder" | "plain"
 	// error_transform 类型专用字段
-	ErrorCode             string               `mapstructure:"error_code" json:"error_code,omitempty" yaml:"error_code,omitempty"`
-	ErrorMessage          string               `mapstructure:"error_message" json:"error_message,omitempty" yaml:"error_message,omitempty"`
-	RequestSizeThreshold  int                  `mapstructure:"request_size_threshold" json:"request_size_threshold,omitempty" yaml:"request_size_threshold,omitempty"`
-	ContextTokenLimit     int                  `mapstructure:"context_token_limit" json:"context_token_limit,omitempty" yaml:"context_token_limit,omitempty"`
-	ModelContextLimits    []ModelContextLimit  `mapstructure:"model_context_limits" json:"model_context_limits,omitempty" yaml:"model_context_limits,omitempty"`
-	ContextThresholdRatio float64              `mapstructure:"context_threshold_ratio" json:"context_threshold_ratio,omitempty" yaml:"context_threshold_ratio,omitempty"`
-	TokenEstimateRatio    float64              `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
-	ParamConditions       []ParamCondition     `mapstructure:"param_conditions" json:"param_conditions,omitempty" yaml:"param_conditions,omitempty"`
-	HeaderInjections      []HeaderInjection    `mapstructure:"header_injections" json:"header_injections,omitempty" yaml:"header_injections,omitempty"`
-	Builtin              bool   `mapstructure:"builtin" json:"builtin" yaml:"builtin,omitempty"`
-	IsTemplate   bool                   `mapstructure:"is_template" json:"is_template,omitempty" yaml:"is_template,omitempty"`
-	TemplateRef  string                 `mapstructure:"template_ref" json:"template_ref,omitempty" yaml:"template_ref,omitempty"`
-	TemplateArgs map[string]string      `mapstructure:"template_args" json:"template_args,omitempty" yaml:"template_args,omitempty"`
+	ErrorCode             string              `mapstructure:"error_code" json:"error_code,omitempty" yaml:"error_code,omitempty"`
+	ErrorMessage          string              `mapstructure:"error_message" json:"error_message,omitempty" yaml:"error_message,omitempty"`
+	ErrorPatterns         []string            `mapstructure:"error_patterns" json:"error_patterns,omitempty" yaml:"error_patterns,omitempty"` // 响应体正则匹配模式，匹配到任一则触发错误转换
+	RequestSizeThreshold  int                 `mapstructure:"request_size_threshold" json:"request_size_threshold,omitempty" yaml:"request_size_threshold,omitempty"`
+	ContextTokenLimit     int                 `mapstructure:"context_token_limit" json:"context_token_limit,omitempty" yaml:"context_token_limit,omitempty"`
+	ModelContextLimits    []ModelContextLimit `mapstructure:"model_context_limits" json:"model_context_limits,omitempty" yaml:"model_context_limits,omitempty"`
+	ContextThresholdRatio float64             `mapstructure:"context_threshold_ratio" json:"context_threshold_ratio,omitempty" yaml:"context_threshold_ratio,omitempty"`
+	TokenEstimateRatio    float64             `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
+	ParamConditions       []ParamCondition    `mapstructure:"param_conditions" json:"param_conditions,omitempty" yaml:"param_conditions,omitempty"`
+	HeaderInjections      []HeaderInjection   `mapstructure:"header_injections" json:"header_injections,omitempty" yaml:"header_injections,omitempty"`
+	Builtin               bool                `mapstructure:"builtin" json:"builtin" yaml:"builtin,omitempty"`
+	IsTemplate            bool                `mapstructure:"is_template" json:"is_template,omitempty" yaml:"is_template,omitempty"`
+	TemplateRef           string              `mapstructure:"template_ref" json:"template_ref,omitempty" yaml:"template_ref,omitempty"`
+	TemplateArgs          map[string]string   `mapstructure:"template_args" json:"template_args,omitempty" yaml:"template_args,omitempty"`
 }
 
 // MappingRule binds a transformer to conditions (tags/gateways)
@@ -61,7 +62,7 @@ type MappingRule struct {
 	Enabled     bool     `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
 	Tags        []string `mapstructure:"tags" json:"tags" yaml:"tags"`
 	Gateways    []string `mapstructure:"gateways" json:"gateways" yaml:"gateways"`
-	Tools       []string `mapstructure:"tools" json:"tools,omitempty" yaml:"tools,omitempty"` // Tool names to match
+	Tools       []string `mapstructure:"tools" json:"tools,omitempty" yaml:"tools,omitempty"`       // Tool names to match
 	ToolOp      string   `mapstructure:"tool_op" json:"tool_op,omitempty" yaml:"tool_op,omitempty"` // "all" (default) or "any"
 	Transformer string   `mapstructure:"transformer" json:"transformer" yaml:"transformer"`
 	Builtin     bool     `mapstructure:"builtin" json:"builtin" yaml:"builtin,omitempty"`

@@ -498,6 +498,26 @@ func (h *Handler) shouldTransformToContextError(reqCtx *requestContext, respStat
 	return nil
 }
 
+// shouldTransformToPatternError 检查错误响应体是否匹配已配置的错误模式
+func (h *Handler) shouldTransformToPatternError(reqCtx *requestContext, respStatus int, respBody []byte) *transformer.TransformerDef {
+	// 只处理错误响应
+	if respStatus < 400 {
+		return nil
+	}
+
+	// 跳过压缩请求（避免死循环）
+	if h.isCompressRequest(reqCtx.reqBody) {
+		return nil
+	}
+
+	// 获取基于模式匹配的错误转换器
+	if h.transformerRegistry == nil {
+		return nil
+	}
+
+	return h.transformerRegistry.GetErrorPatternTransformer(reqCtx.tags, string(respBody))
+}
+
 // writeContextLengthError 写入上下文超限错误响应
 func (h *Handler) writeContextLengthError(c *gin.Context, handler *transformer.TransformerDef, reqSize int) {
 	h.logger.Warn("transforming error response to context_length_exceeded",
@@ -914,6 +934,14 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 		return
 	}
 
+	// 检查错误响应体是否匹配已配置的错误模式（如 input too long）
+	if handler := h.shouldTransformToPatternError(reqCtx, resp.StatusCode, decompressedBody); handler != nil {
+		h.updateConnectionStatus(reqCtx.connInfo, "error_transformed", reqCtx.meta.DurationMs)
+		h.saveLog(reqCtx)
+		h.writeContextLengthError(c, handler, len(reqCtx.reqBody))
+		return
+	}
+
 	// Update memory store
 	if reqCtx.connInfo != nil && h.memoryStore != nil {
 		h.memoryStore.Update(reqCtx.connInfo.ID, func(c *memory.ConnectionInfo) {
@@ -992,6 +1020,14 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		reqCtx.forceLog = h.shouldForceLog(resp.StatusCode, len(respBody), false) // 设置强制记录标记
 
 		if handler := h.shouldTransformToContextError(reqCtx, resp.StatusCode, len(respBody)); handler != nil {
+			h.updateConnectionStatus(reqCtx.connInfo, "error_transformed", reqCtx.meta.DurationMs)
+			h.saveLog(reqCtx)
+			h.writeContextLengthError(c, handler, len(reqCtx.reqBody))
+			return
+		}
+
+		// 检查错误响应体是否匹配已配置的错误模式（如 input too long）
+		if handler := h.shouldTransformToPatternError(reqCtx, resp.StatusCode, respBody); handler != nil {
 			h.updateConnectionStatus(reqCtx.connInfo, "error_transformed", reqCtx.meta.DurationMs)
 			h.saveLog(reqCtx)
 			h.writeContextLengthError(c, handler, len(reqCtx.reqBody))
