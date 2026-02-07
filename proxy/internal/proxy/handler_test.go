@@ -35,12 +35,9 @@ func TestMatchModelPattern(t *testing.T) {
 }
 
 func TestGetContextTokenLimit(t *testing.T) {
+	// 测试统一 200K 限制（无 ModelContextLimits）
 	handler := &transformer.TransformerDef{
 		ContextTokenLimit: 200000,
-		ModelContextLimits: []transformer.ModelContextLimit{
-			{ModelPattern: "claude-opus-4-6*", TokenLimit: 1000000},
-			{ModelPattern: "claude-opus-4.6*", TokenLimit: 1000000},
-		},
 	}
 
 	tests := []struct {
@@ -48,13 +45,13 @@ func TestGetContextTokenLimit(t *testing.T) {
 		model    string
 		expected int
 	}{
-		{"opus 4-6", "claude-opus-4-6", 1000000},
-		{"opus 4-6 with date", "claude-opus-4-6-20260101", 1000000},
-		{"opus 4.6", "claude-opus-4.6", 1000000},
-		{"opus 4.6 with date", "claude-opus-4.6-20260201", 1000000},
-		{"sonnet 4 (default)", "claude-sonnet-4", 200000},
-		{"opus 3.5 (default)", "claude-opus-3-5", 200000},
-		{"empty model (default)", "", 200000},
+		{"opus 4-6", "claude-opus-4-6", 200000},
+		{"opus 4-6 with date", "claude-opus-4-6-20260101", 200000},
+		{"opus 4.6", "claude-opus-4.6", 200000},
+		{"opus 4.6 with date", "claude-opus-4.6-20260201", 200000},
+		{"sonnet 4", "claude-sonnet-4", 200000},
+		{"opus 3.5", "claude-opus-3-5", 200000},
+		{"empty model", "", 200000},
 	}
 
 	for _, tt := range tests {

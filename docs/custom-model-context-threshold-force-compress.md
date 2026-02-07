@@ -1,7 +1,13 @@
 # 支持模型特定上下文阈值配置
 
+## 当前配置（2026-02-07）
+所有模型统一使用 200K token 限制，触发阈值为 70%（约 140K tokens）：
+- `ContextTokenLimit: 200000`
+- `ContextThresholdRatio: 0.7`
+- 移除了 `ModelContextLimits` 配置，所有模型保持一致行为
+
 ## 背景
-当前 Kiro 上下文限制检测使用固定的 `ContextTokenLimit: 200000`，但新模型 `claude-opus-4-6` 和 `claude-opus-4.6` 支持 1M 上下文，需要支持根据不同模型设置不同的阈值。
+当前 Kiro 上下文限制检测使用固定的 `ContextTokenLimit: 200000`。历史上曾为 `claude-opus-4-6` 和 `claude-opus-4.6` 配置过 1M 上下文支持，但现已统一回归 200K 以保持与其他模型一致。
 
 ## 当前实现分析
 
