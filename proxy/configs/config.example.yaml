@@ -145,6 +145,9 @@ tagging:
 # Structure:
 # - definitions: Define transformer logic (source tool -> target tool mapping)
 # - mappings: Bind transformers to conditions (tags/gateways)
+#
+# Note: User-defined transformers with the same name as builtin transformers will override them.
+# This allows you to customize builtin behavior without modifying mappings.
 transformers:
   # Transformer definitions
   definitions:
@@ -205,6 +208,23 @@ transformers:
     #   context_threshold_ratio: 0.85  # Trigger at 85% of limit
     #   token_estimate_ratio: 3.5      # Bytes to tokens estimation ratio
 
+    # Example: Override builtin $droid_upstream_kiro_force_compress to adjust threshold
+    # - name: "$droid_upstream_kiro_force_compress"
+    #   description: "Override builtin error transformer with custom threshold"
+    #   type: "error_transform"
+    #   direction: "response"
+    #   error_code: "context_length_exceeded"
+    #   error_message: "prompt is too long: request size exceeds limit"
+    #   request_size_threshold: 500000
+    #   context_token_limit: 200000
+    #   context_threshold_ratio: 0.6  # Override: 60% instead of default 70%
+    #   token_estimate_ratio: 3.5
+    #   model_context_limits:
+    #     - model_pattern: "claude-opus-4-6*"
+    #       token_limit: 1000000
+    #     - model_pattern: "claude-opus-4.6*"
+    #       token_limit: 1000000
+
     # === Type: header_inject (Header 注入) ===
     # Example: Header injection transformer
     # - name: "inject_custom_agent_header"
@@ -252,6 +272,24 @@ transformers:
     #   # Post-compression handling
     #   auto_retry: true                # Auto retry original request after compression
     #   max_retries: 1                  # Max retry count
+
+    # Example: Override builtin $auto_compress to adjust threshold
+    # - name: "$auto_compress"
+    #   description: "Override builtin compress transformer with custom threshold"
+    #   type: "compress"
+    #   direction: "request"
+    #   context_token_limit: 200000
+    #   context_threshold_ratio: 0.5  # Override: 50% instead of default 70%
+    #   token_estimate_ratio: 3.5
+    #   model_context_limits:
+    #     - model_pattern: "claude-opus-4-6*"
+    #       token_limit: 1000000
+    #   compress_target: "same"
+    #   compress_model: ""
+    #   preserve_budget: 40000
+    #   summary_budget: 4000
+    #   auto_retry: true
+    #   max_retries: 1
 
   # Mapping rules (bind transformers to conditions)
   mappings:

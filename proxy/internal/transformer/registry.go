@@ -21,14 +21,47 @@ type MessageInjectResult struct {
 
 func NewRegistry(cfg Config) *Registry {
 	// Merge builtin templates, definitions and user configs
+	// User-defined items with the same name as builtin items will override them
 	allDefs := make([]TransformerDef, 0)
 	allDefs = append(allDefs, BuiltinTemplates...)
 	allDefs = append(allDefs, BuiltinDefinitions...)
-	allDefs = append(allDefs, cfg.Definitions...)
+
+	// User definitions override builtin definitions with the same name
+	for _, userDef := range cfg.Definitions {
+		overridden := false
+		for i, def := range allDefs {
+			if def.Name == userDef.Name {
+				allDefs[i] = userDef
+				overridden = true
+				break
+			}
+		}
+		if !overridden {
+			allDefs = append(allDefs, userDef)
+		}
+	}
+
+	// User mappings override builtin mappings with the same name
+	allMappings := make([]MappingRule, 0)
+	allMappings = append(allMappings, BuiltinMappings...)
+
+	for _, userMapping := range cfg.Mappings {
+		overridden := false
+		for i, mapping := range allMappings {
+			if mapping.Name == userMapping.Name {
+				allMappings[i] = userMapping
+				overridden = true
+				break
+			}
+		}
+		if !overridden {
+			allMappings = append(allMappings, userMapping)
+		}
+	}
 
 	r := &Registry{
 		definitions: allDefs,
-		mappings:    append(append([]MappingRule{}, BuiltinMappings...), cfg.Mappings...),
+		mappings:    allMappings,
 	}
 	// Resolve template references
 	r.resolveAllTemplates()
