@@ -27,7 +27,7 @@ export interface TransformerDef {
   name: string
   description?: string
   direction: 'request' | 'response'
-  type?: 'tool' | 'message_inject' | 'error_transform' | 'header_inject'
+  type?: 'tool' | 'message_inject' | 'error_transform' | 'header_inject' | 'compress'
   
   // Tool transform fields
   source_tool?: string
@@ -43,12 +43,23 @@ export interface TransformerDef {
   // Error transform fields
   error_code?: string
   error_message?: string
+  error_patterns?: string[]
   request_size_threshold?: number
   context_token_limit?: number
   model_context_limits?: ModelContextLimit[]
   context_threshold_ratio?: number
   token_estimate_ratio?: number
   param_conditions?: ParamCondition[]
+  
+  // Compress fields
+  compress_target?: string
+  compress_model?: string
+  compress_system_prompt?: string
+  compress_user_prompt?: string
+  preserve_budget?: number
+  summary_budget?: number
+  auto_retry?: boolean
+  max_retries?: number
   
   // Common fields
   header_injections?: HeaderInjection[]

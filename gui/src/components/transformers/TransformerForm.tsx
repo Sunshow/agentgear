@@ -49,7 +49,7 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [type, setType] = useState<'tool' | 'message_inject' | 'error_transform' | 'header_inject'>('tool')
+  const [type, setType] = useState<'tool' | 'message_inject' | 'error_transform' | 'header_inject' | 'compress'>('tool')
   const [direction, setDirection] = useState<'request' | 'response'>('response')
   
   // Tool transform fields
@@ -68,6 +68,17 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
   const [requestSizeThreshold, setRequestSizeThreshold] = useState(500000)
   const [contextTokenLimit, setContextTokenLimit] = useState(200000)
   const [contextThresholdRatio, setContextThresholdRatio] = useState(0.85)
+  const [tokenEstimateRatio, setTokenEstimateRatio] = useState(3.5)
+  
+  // Compress fields
+  const [compressTarget, setCompressTarget] = useState('same')
+  const [compressModel, setCompressModel] = useState('claude-3-5-sonnet-20241022')
+  const [compressSystemPrompt, setCompressSystemPrompt] = useState('')
+  const [compressUserPrompt, setCompressUserPrompt] = useState('')
+  const [preserveBudget, setPreserveBudget] = useState(40000)
+  const [summaryBudget, setSummaryBudget] = useState(4000)
+  const [autoRetry, setAutoRetry] = useState(true)
+  const [maxRetries, setMaxRetries] = useState(1)
   
   // Common fields
   const [headerInjections, setHeaderInjections] = useState<HeaderInjection[]>([])
@@ -108,6 +119,17 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
       setRequestSizeThreshold(definition.request_size_threshold || 500000)
       setContextTokenLimit(definition.context_token_limit || 200000)
       setContextThresholdRatio(definition.context_threshold_ratio || 0.85)
+      setTokenEstimateRatio(definition.token_estimate_ratio || 3.5)
+      
+      // Compress fields
+      setCompressTarget(definition.compress_target || 'same')
+      setCompressModel(definition.compress_model || 'claude-3-5-sonnet-20241022')
+      setCompressSystemPrompt(definition.compress_system_prompt || '')
+      setCompressUserPrompt(definition.compress_user_prompt || '')
+      setPreserveBudget(definition.preserve_budget || 40000)
+      setSummaryBudget(definition.summary_budget || 4000)
+      setAutoRetry(definition.auto_retry !== undefined ? definition.auto_retry : true)
+      setMaxRetries(definition.max_retries || 1)
       
       // Common fields
       setHeaderInjections(definition.header_injections && definition.header_injections.length > 0 ? definition.header_injections : [])
@@ -129,6 +151,15 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
       setRequestSizeThreshold(500000)
       setContextTokenLimit(200000)
       setContextThresholdRatio(0.85)
+      setTokenEstimateRatio(3.5)
+      setCompressTarget('same')
+      setCompressModel('claude-3-5-sonnet-20241022')
+      setCompressSystemPrompt('')
+      setCompressUserPrompt('')
+      setPreserveBudget(40000)
+      setSummaryBudget(4000)
+      setAutoRetry(true)
+      setMaxRetries(1)
       setHeaderInjections([])
       setIsTemplate(false)
       setTemplateArgs({})
@@ -148,6 +179,15 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
       setRequestSizeThreshold(500000)
       setContextTokenLimit(200000)
       setContextThresholdRatio(0.85)
+      setTokenEstimateRatio(3.5)
+      setCompressTarget('same')
+      setCompressModel('claude-3-5-sonnet-20241022')
+      setCompressSystemPrompt('')
+      setCompressUserPrompt('')
+      setPreserveBudget(40000)
+      setSummaryBudget(4000)
+      setAutoRetry(true)
+      setMaxRetries(1)
       setHeaderInjections([])
       setIsTemplate(false)
       setTemplateArgs({})
@@ -160,6 +200,8 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
       setDirection('request')
     } else if (type === 'error_transform') {
       setDirection('response')
+    } else if (type === 'compress') {
+      setDirection('request')
     } else if (type === 'header_inject' && !definition) {
       // Default to request for header_inject when creating new
       setDirection('request')
@@ -233,6 +275,20 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
         newDef.request_size_threshold = requestSizeThreshold
         newDef.context_token_limit = contextTokenLimit
         newDef.context_threshold_ratio = contextThresholdRatio
+        newDef.token_estimate_ratio = tokenEstimateRatio
+      } else if (type === 'compress') {
+        newDef.direction = 'request'
+        newDef.compress_target = compressTarget
+        newDef.compress_model = compressModel
+        newDef.compress_system_prompt = compressSystemPrompt || undefined
+        newDef.compress_user_prompt = compressUserPrompt || undefined
+        newDef.context_token_limit = contextTokenLimit
+        newDef.context_threshold_ratio = contextThresholdRatio
+        newDef.token_estimate_ratio = tokenEstimateRatio
+        newDef.preserve_budget = preserveBudget
+        newDef.summary_budget = summaryBudget
+        newDef.auto_retry = autoRetry
+        newDef.max_retries = maxRetries
       } else if (type === 'header_inject') {
         // No tool-specific fields, only direction and header_injections
       }
@@ -373,7 +429,7 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
                     <label className="mb-1.5 block text-sm font-medium">Type</label>
                     <Select
                       value={type}
-                      onChange={(e) => setType(e.target.value as 'tool' | 'message_inject' | 'error_transform' | 'header_inject')}
+                      onChange={(e) => setType(e.target.value as 'tool' | 'message_inject' | 'error_transform' | 'header_inject' | 'compress')}
                       className="w-full"
                       disabled={isEditing}
                     >
@@ -381,6 +437,7 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
                       <option value="message_inject">Message Inject</option>
                       <option value="error_transform">Error Transform</option>
                       <option value="header_inject">Header Inject</option>
+                      <option value="compress">Compress</option>
                     </Select>
                   </div>
                 </div>
@@ -398,7 +455,7 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
                     value={direction}
                     onChange={(e) => setDirection(e.target.value as 'request' | 'response')}
                     className="w-full"
-                    disabled={type === 'message_inject' || type === 'error_transform'}
+                    disabled={type === 'message_inject' || type === 'error_transform' || type === 'compress'}
                   >
                     <option value="request">Request</option>
                     <option value="response">Response</option>
@@ -411,6 +468,11 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
                   {type === 'error_transform' && (
                     <p className="mt-1 text-xs text-muted-foreground">
                       Error transform only supports response direction
+                    </p>
+                  )}
+                  {type === 'compress' && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Compress only supports request direction
                     </p>
                   )}
                 </div>
@@ -584,6 +646,118 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
                     <p className="text-xs text-muted-foreground">
                       Advanced fields (model_context_limits, token_estimate_ratio, param_conditions) can be configured via YAML.
                     </p>
+                  </>
+                )}
+
+                {/* === Type: compress 专用字段 === */}
+                {type === 'compress' && (
+                  <>
+                    <div className="space-y-4 rounded-md border bg-muted/30 p-3">
+                      <h3 className="text-sm font-medium">Trigger Conditions</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <Input
+                          label="Context Token Limit"
+                          type="number"
+                          value={contextTokenLimit.toString()}
+                          onChange={(e) => setContextTokenLimit(Number(e.target.value))}
+                          placeholder="200000"
+                          required
+                        />
+                        <Input
+                          label="Threshold Ratio"
+                          type="number"
+                          step="0.01"
+                          value={contextThresholdRatio.toString()}
+                          onChange={(e) => setContextThresholdRatio(Number(e.target.value))}
+                          placeholder="0.7"
+                          required
+                        />
+                      </div>
+                      <Input
+                        label="Token Estimate Ratio"
+                        type="number"
+                        step="0.1"
+                        value={tokenEstimateRatio.toString()}
+                        onChange={(e) => setTokenEstimateRatio(Number(e.target.value))}
+                        placeholder="3.5"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-4 rounded-md border bg-muted/30 p-3">
+                      <h3 className="text-sm font-medium">Compression Configuration</h3>
+                      <Input
+                        label="Compress Target"
+                        value={compressTarget}
+                        onChange={(e) => setCompressTarget(e.target.value)}
+                        placeholder='same | gateway:name | url:https://...'
+                        required
+                      />
+                      <Input
+                        label="Compress Model"
+                        value={compressModel}
+                        onChange={(e) => setCompressModel(e.target.value)}
+                        placeholder="claude-3-5-sonnet-20241022"
+                        required
+                      />
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium">Compress System Prompt (optional)</label>
+                        <textarea
+                          value={compressSystemPrompt}
+                          onChange={(e) => setCompressSystemPrompt(e.target.value)}
+                          className="w-full min-h-[100px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                          placeholder="Leave empty to use default 13-part summary guidelines"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium">Compress User Prompt (optional)</label>
+                        <textarea
+                          value={compressUserPrompt}
+                          onChange={(e) => setCompressUserPrompt(e.target.value)}
+                          className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                          placeholder="Leave empty to use default prompt"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 rounded-md border bg-muted/30 p-3">
+                      <h3 className="text-sm font-medium">Message Splitting</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <Input
+                          label="Preserve Budget (tokens)"
+                          type="number"
+                          value={preserveBudget.toString()}
+                          onChange={(e) => setPreserveBudget(Number(e.target.value))}
+                          placeholder="40000"
+                          required
+                        />
+                        <Input
+                          label="Summary Budget (tokens)"
+                          type="number"
+                          value={summaryBudget.toString()}
+                          onChange={(e) => setSummaryBudget(Number(e.target.value))}
+                          placeholder="4000"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 rounded-md border bg-muted/30 p-3">
+                      <h3 className="text-sm font-medium">Post-Compression</h3>
+                      <Checkbox
+                        label="Auto Retry (automatically retry original request after compression)"
+                        checked={autoRetry}
+                        onChange={setAutoRetry}
+                      />
+                      <Input
+                        label="Max Retries"
+                        type="number"
+                        value={maxRetries.toString()}
+                        onChange={(e) => setMaxRetries(Number(e.target.value))}
+                        placeholder="1"
+                        required
+                      />
+                    </div>
                   </>
                 )}
 

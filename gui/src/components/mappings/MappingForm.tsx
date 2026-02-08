@@ -94,10 +94,26 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
   }, [gateways])
 
   const transformerOptions = useMemo(() => {
-    return definitions.map((d) => ({
-      value: d.name,
-      label: `${d.name} (${d.direction}: ${d.source_tool} → ${d.target_tool})`,
-    }))
+    return definitions.map((d) => {
+      let label = d.name
+      if (d.type === 'compress') {
+        label += ` (${d.direction}: compress)`
+      } else if (d.type === 'message_inject') {
+        label += ` (${d.direction}: message inject)`
+      } else if (d.type === 'error_transform') {
+        label += ` (${d.direction}: error transform)`
+      } else if (d.type === 'header_inject') {
+        label += ` (${d.direction}: header inject)`
+      } else if (d.source_tool || d.target_tool) {
+        label += ` (${d.direction}: ${d.source_tool || '*'} → ${d.target_tool || '*'})`
+      } else {
+        label += ` (${d.direction})`
+      }
+      return {
+        value: d.name,
+        label,
+      }
+    })
   }, [definitions])
 
   useEffect(() => {

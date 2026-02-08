@@ -147,6 +147,91 @@ This prevents output truncation with long content.`,
 		},
 		Builtin: true,
 	},
+
+	// === 压缩类型转换器 ===
+	{
+		Name:        "$auto_compress",
+		Description: "通用自动上下文压缩转换器",
+		Type:        "compress",
+		Direction:   "request",
+
+		// 触发条件
+		ContextTokenLimit:     200000,
+		ContextThresholdRatio: 0.7,
+		TokenEstimateRatio:    3.5,
+		ModelContextLimits: []ModelContextLimit{
+			{ModelPattern: "claude-opus-4-6*", TokenLimit: 1000000},
+			{ModelPattern: "claude-opus-4.6*", TokenLimit: 1000000},
+		},
+
+		// 压缩配置
+		CompressTarget: "same",
+		CompressModel:  "claude-3-5-sonnet-20241022",
+		CompressSystemPrompt: `You are an AI assistant specialized in summarizing conversation history.
+Read the complete conversation and generate a structured summary according to the following guidelines:
+
+1. Detailed Chronological Record
+   - Capture every important turn in order, including user messages, assistant responses, and tool calls
+   - Include tool commands and their important outputs (error messages, test results, exit codes); avoid pasting lengthy logs
+   - Use arrows to indicate flow
+   - Paraphrase when necessary but preserve intent, technical details, and results
+
+2. Primary Request and Intent
+   - Why was this session created?
+   - What is the user trying to achieve?
+   - What defines success?
+
+3. Constraints and Boundaries
+   - User-specified requirements (must do / must not do)
+   - Technical limitations discovered
+   - Codebase conventions to follow
+
+4. Decisions Made
+   - Important decisions and their rationale
+   - Rejected alternatives and why
+
+5. Approach - How did the assistant handle the problem?
+
+6. Key Technical Work - List all key technical work completed so far
+
+7. Questions and Clarifications
+   - Questions the assistant asked and clarifications the user provided
+   - Assumptions made when not explicitly clarified (brief)
+
+8. Files and Code Sections
+   - List files created, modified, or deleted
+   - External references if any (PR links, Commit SHAs)
+
+9. Error Resolution
+   - Errors encountered and how they were resolved
+   - Failed approaches and their reasons — avoid retrying unless new information changes conditions
+
+10. Pending Tasks
+    - Incomplete tasks with current status
+    - For partial work: what IS done vs what is NOT done
+
+11. Current Work
+    - Details of the assistant's current task
+    - State snapshot if relevant (branch/commit, dirty status, last test/build result)
+
+12. Next Steps - What should the assistant do next?
+
+13. Critical Information
+    - Key information that must be passed to subsequent conversations
+    - Content that doesn't fit other categories but absolutely cannot be lost
+    - Special notes emphasized by the user`,
+		CompressUserPrompt: "Please read the complete conversation above and generate a summary according to the guidelines. The new session will not have access to our conversation history, so the summary must contain all key information needed to continue the work.",
+
+		// 消息分割配置
+		PreserveBudget: 40000,
+		SummaryBudget:  4000,
+
+		// 压缩后处理
+		AutoRetry:  true,
+		MaxRetries: 1,
+
+		Builtin: true,
+	},
 }
 
 // BuiltinMappings defines built-in mapping rules

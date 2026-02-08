@@ -258,6 +258,49 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 		return
 	}
 
+	// 压缩处理：检测是否需要压缩上下文
+	if compressHandler := h.shouldCompress(reqCtx); compressHandler != nil {
+		h.logger.Info("compression triggered", zap.String("transformer", compressHandler.Name))
+		
+		// 构建压缩目标 URL
+		compressURL, err := h.buildCompressTargetURL(compressHandler)
+		if err != nil {
+			h.logger.Error("failed to build compress target URL", zap.Error(err))
+		} else {
+			// 创建压缩处理器
+			compressor := transformer.NewCompressHandler(compressHandler, h.logger, h.getGatewayMap())
+			
+			// 准备请求头（复制认证信息）
+			compressHeaders := make(map[string]string)
+			for _, key := range []string{"Authorization", "X-Api-Key", "Anthropic-Api-Key"} {
+				if val := c.GetHeader(key); val != "" {
+					compressHeaders[key] = val
+				}
+			}
+			
+			// 执行压缩
+			compressedReq, compressed, err := compressor.Process(transformedReqBody, compressURL, compressHeaders)
+			if err != nil {
+				h.logger.Error("compression failed", zap.Error(err))
+				// 压缩失败，继续使用原请求（降级处理）
+			} else if compressed {
+				h.logger.Info("compression succeeded", 
+					zap.Int("original_size", len(transformedReqBody)),
+					zap.Int("compressed_size", len(compressedReq)))
+				transformedReqBody = compressedReq
+				reqCtx.transformedReqBody = compressedReq
+				reqCtx.forceLog = true
+				
+				// 更新连接信息
+				if connInfo != nil {
+					connInfo.TransformedRequest = true
+					connInfo.TransformedRequestBody = compressedReq
+					connInfo.AppliedRequestTransformers = append(connInfo.AppliedRequestTransformers, "compress:"+compressHandler.Name)
+				}
+			}
+		}
+	}
+
 	// 去掉 gateway 路径前缀
 	path := c.Request.URL.Path
 	if h.gatewayPath != "" {
@@ -682,6 +725,73 @@ func (h *Handler) shouldPreemptContextError(reqCtx *requestContext) *transformer
 	}
 
 	return nil
+}
+
+// shouldCompress 检测是否需要压缩上下文
+func (h *Handler) shouldCompress(reqCtx *requestContext) *transformer.TransformerDef {
+	// 跳过压缩请求（避免死循环）
+	if h.isCompressRequest(reqCtx.reqBody) {
+		return nil
+	}
+
+	// 获取压缩转换器
+	if h.transformerRegistry == nil {
+		return nil
+	}
+	handler := h.transformerRegistry.GetCompressTransformer(reqCtx.tags)
+	if handler == nil {
+		return nil
+	}
+
+	// 从请求体中提取模型名
+	var req map[string]interface{}
+	var model string
+	if err := json.Unmarshal(reqCtx.reqBody, &req); err == nil {
+		if m, ok := req["model"].(string); ok {
+			model = m
+		}
+	}
+
+	// 使用压缩处理器的检测逻辑
+	compressor := transformer.NewCompressHandler(handler, h.logger, h.getGatewayMap())
+	if compressor.ShouldCompress(reqCtx.reqBody, model) {
+		return handler
+	}
+
+	return nil
+}
+
+// buildCompressTargetURL 构建压缩目标 URL
+func (h *Handler) buildCompressTargetURL(handler *transformer.TransformerDef) (string, error) {
+	target := handler.CompressTarget
+	if target == "" || target == "same" {
+		// 使用当前 gateway 的上游 URL
+		return h.upstreamURL + "/v1/messages", nil
+	}
+
+	// gateway:name 格式
+	if strings.HasPrefix(target, "gateway:") {
+		gatewayName := strings.TrimPrefix(target, "gateway:")
+		gatewayMap := h.getGatewayMap()
+		if url, ok := gatewayMap[gatewayName]; ok {
+			return url + "/v1/messages", nil
+		}
+		return "", fmt.Errorf("gateway not found: %s", gatewayName)
+	}
+
+	// url:https://... 格式
+	if strings.HasPrefix(target, "url:") {
+		return strings.TrimPrefix(target, "url:"), nil
+	}
+
+	return "", fmt.Errorf("invalid compress target: %s", target)
+}
+
+// getGatewayMap 获取 gateway 名称到 URL 的映射
+func (h *Handler) getGatewayMap() map[string]string {
+	// 这里需要从配置中获取，暂时返回空 map
+	// TODO: 从全局配置中获取 gateway 映射
+	return make(map[string]string)
 }
 
 // injectMessage injects text into the first user message's content

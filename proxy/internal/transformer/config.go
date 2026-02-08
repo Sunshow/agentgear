@@ -49,10 +49,19 @@ type TransformerDef struct {
 	TokenEstimateRatio    float64             `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
 	ParamConditions       []ParamCondition    `mapstructure:"param_conditions" json:"param_conditions,omitempty" yaml:"param_conditions,omitempty"`
 	HeaderInjections      []HeaderInjection   `mapstructure:"header_injections" json:"header_injections,omitempty" yaml:"header_injections,omitempty"`
-	Builtin               bool                `mapstructure:"builtin" json:"builtin" yaml:"builtin,omitempty"`
-	IsTemplate            bool                `mapstructure:"is_template" json:"is_template,omitempty" yaml:"is_template,omitempty"`
-	TemplateRef           string              `mapstructure:"template_ref" json:"template_ref,omitempty" yaml:"template_ref,omitempty"`
-	TemplateArgs          map[string]string   `mapstructure:"template_args" json:"template_args,omitempty" yaml:"template_args,omitempty"`
+	// compress 类型专用字段
+	CompressTarget       string `mapstructure:"compress_target" json:"compress_target,omitempty" yaml:"compress_target,omitempty"`             // "same" | "gateway:name" | "url:https://..."
+	CompressModel        string `mapstructure:"compress_model" json:"compress_model,omitempty" yaml:"compress_model,omitempty"`                // 压缩使用的模型
+	CompressSystemPrompt string `mapstructure:"compress_system_prompt" json:"compress_system_prompt,omitempty" yaml:"compress_system_prompt,omitempty"` // 压缩 system prompt
+	CompressUserPrompt   string `mapstructure:"compress_user_prompt" json:"compress_user_prompt,omitempty" yaml:"compress_user_prompt,omitempty"`       // 压缩 user prompt
+	PreserveBudget       int    `mapstructure:"preserve_budget" json:"preserve_budget,omitempty" yaml:"preserve_budget,omitempty"`             // 保留最近 N tokens
+	SummaryBudget        int    `mapstructure:"summary_budget" json:"summary_budget,omitempty" yaml:"summary_budget,omitempty"`                // 摘要预算 tokens
+	AutoRetry            bool   `mapstructure:"auto_retry" json:"auto_retry,omitempty" yaml:"auto_retry,omitempty"`                            // 自动重试原请求
+	MaxRetries           int    `mapstructure:"max_retries" json:"max_retries,omitempty" yaml:"max_retries,omitempty"`                         // 最大重试次数
+	Builtin              bool   `mapstructure:"builtin" json:"builtin" yaml:"builtin,omitempty"`
+	IsTemplate           bool   `mapstructure:"is_template" json:"is_template,omitempty" yaml:"is_template,omitempty"`
+	TemplateRef          string `mapstructure:"template_ref" json:"template_ref,omitempty" yaml:"template_ref,omitempty"`
+	TemplateArgs         map[string]string `mapstructure:"template_args" json:"template_args,omitempty" yaml:"template_args,omitempty"`
 }
 
 // MappingRule binds a transformer to conditions (tags/gateways)

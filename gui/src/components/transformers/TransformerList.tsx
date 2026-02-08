@@ -237,6 +237,23 @@ function TransformerCard({ def, onEdit, onDelete, onCreateFromTemplate }: Transf
           </div>
         ) : (
           <>
+            {/* Type badge */}
+            {def.type && def.type !== 'tool' && (
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground text-xs">Type:</span>
+                <span className={cn(
+                  "rounded px-1.5 py-0.5 text-xs",
+                  def.type === 'compress' && "bg-cyan-500/20 text-cyan-600 dark:text-cyan-400",
+                  def.type === 'message_inject' && "bg-green-500/20 text-green-600 dark:text-green-400",
+                  def.type === 'error_transform' && "bg-red-500/20 text-red-600 dark:text-red-400",
+                  def.type === 'header_inject' && "bg-purple-500/20 text-purple-600 dark:text-purple-400"
+                )}>
+                  {def.type}
+                </span>
+              </div>
+            )}
+            
+            {/* Tool transform fields */}
             {(def.source_tool || def.target_tool) && (
               <div className="flex items-center gap-2">
                 <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{def.source_tool || '-'}</code>
@@ -252,6 +269,47 @@ function TransformerCard({ def, onEdit, onDelete, onCreateFromTemplate }: Transf
                 </span>
               </div>
             )}
+            
+            {/* Compress fields */}
+            {def.type === 'compress' && (
+              <>
+                {def.compress_model && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-xs">Model:</span>
+                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{def.compress_model}</code>
+                  </div>
+                )}
+                {def.compress_target && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-xs">Target:</span>
+                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{def.compress_target}</code>
+                  </div>
+                )}
+                {def.context_token_limit && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-xs">Token Limit:</span>
+                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                      {def.context_token_limit.toLocaleString()} @ {((def.context_threshold_ratio || 0.7) * 100).toFixed(0)}%
+                    </code>
+                  </div>
+                )}
+                {def.preserve_budget && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-xs">Preserve:</span>
+                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{def.preserve_budget.toLocaleString()} tokens</code>
+                  </div>
+                )}
+                {def.auto_retry && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-xs">Auto Retry:</span>
+                    <span className="rounded bg-green-500/20 px-1.5 py-0.5 text-xs text-green-600 dark:text-green-400">
+                      enabled
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
+            
             {def.param_mapping && def.param_mapping.length > 0 && (
               <div className="flex items-start gap-2">
                 <span className="text-muted-foreground text-xs">Mappings:</span>
