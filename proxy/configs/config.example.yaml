@@ -291,6 +291,59 @@ transformers:
     #   auto_retry: true
     #   max_retries: 1
 
+    # === Type: auto_compress_on_error (400 错误自动压缩重试) ===
+    # Detects 400 errors from upstream, automatically compresses context and retries.
+    # Useful for non-Droid agents that don't have built-in compression support.
+    # NOTE: Only the builtin definition is provided. You must add a mapping to enable it.
+    #
+    # Example: Custom 400 error auto compress retry configuration
+    # - name: "my_400_auto_compress_retry"
+    #   description: "Custom 400 error auto compress retry"
+    #   type: "auto_compress_on_error"
+    #   direction: "response"            # auto_compress_on_error only supports "response"
+    #   
+    #   # Error detection configuration
+    #   error_patterns:                  # Regex patterns to match against 400 response body
+    #     - "(?i)improperly formed request"
+    #     - "(?i)input length"
+    #   
+    #   # Compression configuration (same as compress type)
+    #   compress_target: "same"          # "same" | "gateway:name" | "url:https://..."
+    #   compress_model: ""               # Model for compression (leave empty to use original request model)
+    #   context_token_limit: 200000      # Default token limit
+    #   context_threshold_ratio: 0.7     # Trigger at 70% of limit
+    #   token_estimate_ratio: 3.5        # Bytes to tokens estimation ratio
+    #   model_context_limits:            # Model-specific limits (higher priority)
+    #     - model_pattern: "claude-opus-4-6*"
+    #       token_limit: 1000000
+    #   preserve_budget: 40000           # Preserve recent N tokens
+    #   summary_budget: 4000             # Summary budget tokens
+    #   
+    #   # Retry configuration
+    #   auto_retry: true                 # Auto retry original request after compression
+    #   max_retries: 1                   # Max retry count
+
+    # Example: Override builtin $generic_400_auto_compress_retry to adjust threshold
+    # - name: "$generic_400_auto_compress_retry"
+    #   description: "Override builtin auto compress retry with custom threshold"
+    #   type: "auto_compress_on_error"
+    #   direction: "response"
+    #   error_patterns:
+    #     - "(?i)improperly formed request"
+    #     - "(?i)input length"
+    #   compress_target: "same"
+    #   compress_model: ""
+    #   context_token_limit: 200000
+    #   context_threshold_ratio: 0.5   # Override: 50% instead of default 70%
+    #   token_estimate_ratio: 3.5
+    #   model_context_limits:
+    #     - model_pattern: "claude-opus-4-6*"
+    #       token_limit: 1000000
+    #   preserve_budget: 40000
+    #   summary_budget: 4000
+    #   auto_retry: true
+    #   max_retries: 1
+
   # Mapping rules (bind transformers to conditions)
   mappings:
     # Example: Apply transformer for Droid agent via WARP gateway
@@ -324,4 +377,19 @@ transformers:
     #   tags: []                        # Empty = match all
     #   exclude_tags: ["$a_cursor"]     # Exclude Cursor agent
     #   transformer: "another_transformer"
+
+    # Example: Enable builtin 400 auto compress retry for Cursor agent
+    # - name: "cursor_400_auto_compress_retry"
+    #   description: "Cursor Agent 400 error auto compress retry"
+    #   enabled: true
+    #   tags: ["$a_cursor", "$u_kiro"]
+    #   transformer: "$generic_400_auto_compress_retry"
+
+    # Example: Enable builtin 400 auto compress retry for all non-Droid agents
+    # - name: "non_droid_400_auto_compress_retry"
+    #   description: "Non-Droid Agent 400 error auto compress retry"
+    #   enabled: true
+    #   tags: ["$u_kiro"]
+    #   exclude_tags: ["$a_droid"]
+    #   transformer: "$generic_400_auto_compress_retry"
 

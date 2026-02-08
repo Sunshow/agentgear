@@ -709,3 +709,37 @@ func (r *Registry) GetCompressTransformer(tags []string) *TransformerDef {
 	}
 	return nil
 }
+
+// GetAutoCompressOnErrorTransformer returns the first auto_compress_on_error transformer that matches
+// the given tags and whose error patterns match the response body content
+func (r *Registry) GetAutoCompressOnErrorTransformer(tags []string, respBody string) *TransformerDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
+			continue
+		}
+		// Find the referenced definition
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Type == "auto_compress_on_error" && len(d.ErrorPatterns) > 0 {
+				// Check if any pattern matches the response body
+				for _, pattern := range d.ErrorPatterns {
+					re, err := regexp.Compile(pattern)
+					if err != nil {
+						continue
+					}
+					if re.MatchString(respBody) {
+						return d
+					}
+				}
+			}
+		}
+	}
+	return nil
+}

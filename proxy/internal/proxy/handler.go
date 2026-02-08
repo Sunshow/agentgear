@@ -761,6 +761,96 @@ func (h *Handler) shouldCompress(reqCtx *requestContext) *transformer.Transforme
 	return nil
 }
 
+// shouldAutoCompressOnError 检测是否需要在 400 错误时自动压缩并重试
+func (h *Handler) shouldAutoCompressOnError(reqCtx *requestContext, respStatus int, respBody []byte) *transformer.TransformerDef {
+	// 只处理 400 错误
+	if respStatus != http.StatusBadRequest {
+		return nil
+	}
+
+	// 跳过压缩请求（避免死循环）
+	if h.isCompressRequest(reqCtx.reqBody) {
+		return nil
+	}
+
+	// 获取 auto_compress_on_error 类型转换器
+	if h.transformerRegistry == nil {
+		return nil
+	}
+
+	handler := h.transformerRegistry.GetAutoCompressOnErrorTransformer(reqCtx.tags, string(respBody))
+	return handler
+}
+
+// handleAutoCompressRetry 执行自动压缩并重试
+func (h *Handler) handleAutoCompressRetry(c *gin.Context, reqCtx *requestContext, handler *transformer.TransformerDef, upstreamURL string) (success bool, retryResp *http.Response, retryBody []byte) {
+	h.logger.Info("auto_compress_on_error triggered", zap.String("transformer", handler.Name))
+
+	// 1. 构建压缩目标 URL
+	compressURL, err := h.buildCompressTargetURL(handler)
+	if err != nil {
+		h.logger.Error("failed to build compress target URL", zap.Error(err))
+		return false, nil, nil
+	}
+
+	// 2. 创建压缩处理器
+	compressor := transformer.NewCompressHandler(handler, h.logger, h.getGatewayMap())
+
+	// 3. 准备认证头
+	compressHeaders := make(map[string]string)
+	for _, key := range []string{"Authorization", "X-Api-Key", "Anthropic-Api-Key"} {
+		if val := c.GetHeader(key); val != "" {
+			compressHeaders[key] = val
+		}
+	}
+
+	// 4. 执行压缩
+	compressedReq, compressed, err := compressor.Process(reqCtx.transformedReqBody, compressURL, compressHeaders)
+	if err != nil || !compressed {
+		h.logger.Error("compression failed", zap.Error(err), zap.Bool("compressed", compressed))
+		return false, nil, nil
+	}
+
+	h.logger.Info("compression succeeded, retrying request",
+		zap.Int("original_size", len(reqCtx.transformedReqBody)),
+		zap.Int("compressed_size", len(compressedReq)))
+
+	// 5. 重试请求
+	retryReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, upstreamURL, bytes.NewBuffer(compressedReq))
+	if err != nil {
+		h.logger.Error("failed to create retry request", zap.Error(err))
+		return false, nil, nil
+	}
+
+	// 复制原请求头
+	for key, values := range c.Request.Header {
+		for _, value := range values {
+			retryReq.Header.Add(key, value)
+		}
+	}
+
+	// 执行重试
+	retryResp, err = h.httpClient.Do(retryReq)
+	if err != nil {
+		h.logger.Error("retry request failed", zap.Error(err))
+		return false, nil, nil
+	}
+
+	// 读取重试响应
+	retryBody, err = io.ReadAll(retryResp.Body)
+	retryResp.Body.Close()
+	if err != nil {
+		h.logger.Error("failed to read retry response", zap.Error(err))
+		return false, retryResp, nil
+	}
+
+	h.logger.Info("retry request completed",
+		zap.Int("status", retryResp.StatusCode),
+		zap.Int("body_size", len(retryBody)))
+
+	return true, retryResp, retryBody
+}
+
 // buildCompressTargetURL 构建压缩目标 URL
 func (h *Handler) buildCompressTargetURL(handler *transformer.TransformerDef) (string, error) {
 	target := handler.CompressTarget
@@ -1037,6 +1127,53 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 	// 设置强制记录标记（非200响应或200但body为空）
 	reqCtx.forceLog = h.shouldForceLog(resp.StatusCode, len(decompressedBody), false)
 
+	// === 新增：检测 400 错误并尝试自动压缩重试 ===
+	if handler := h.shouldAutoCompressOnError(reqCtx, resp.StatusCode, decompressedBody); handler != nil {
+		// 构建上游 URL
+		path := c.Request.URL.Path
+		if h.gatewayPath != "" {
+			path = strings.TrimPrefix(path, h.gatewayPath)
+		}
+		upstreamURL := h.upstreamURL + path
+		if c.Request.URL.RawQuery != "" {
+			upstreamURL += "?" + c.Request.URL.RawQuery
+		}
+
+		// 执行压缩重试
+		success, retryResp, retryBody := h.handleAutoCompressRetry(c, reqCtx, handler, upstreamURL)
+
+		if success && retryResp != nil {
+			// 重试成功，使用重试响应
+			reqCtx.meta.Response = &ResponseMeta{
+				Status:  retryResp.StatusCode,
+				Headers: sanitizeHeaders(retryResp.Header),
+			}
+			reqCtx.respBody = retryBody
+			reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
+			reqCtx.forceLog = true // 强制记录压缩重试日志
+
+			// 更新连接信息
+			h.updateConnectionStatus(reqCtx.connInfo, "completed_after_compress_retry", reqCtx.meta.DurationMs)
+			if reqCtx.connInfo != nil {
+				reqCtx.connInfo.AppliedResponseTransformers = append(reqCtx.connInfo.AppliedResponseTransformers, "compress_retry:"+handler.Name)
+			}
+			h.saveLog(reqCtx)
+
+			// 返回重试响应
+			for key, values := range retryResp.Header {
+				for _, value := range values {
+					c.Header(key, value)
+				}
+			}
+			h.applyResponseHeaderInjections(c, reqCtx.tags, reqCtx)
+			c.Data(retryResp.StatusCode, retryResp.Header.Get("Content-Type"), retryBody)
+			return
+		}
+
+		// 压缩或重试失败，继续原有错误处理流程（返回原始 400 错误）
+		h.logger.Info("compress retry failed, returning original 400 error")
+	}
+
 	// 检查是否需要转换为上下文超限错误
 	if handler := h.shouldTransformToContextError(reqCtx, resp.StatusCode, len(decompressedBody)); handler != nil {
 		h.updateConnectionStatus(reqCtx.connInfo, "error_transformed", reqCtx.meta.DurationMs)
@@ -1129,6 +1266,52 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		reqCtx.respBody = respBody
 		reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
 		reqCtx.forceLog = h.shouldForceLog(resp.StatusCode, len(respBody), false) // 设置强制记录标记
+
+		// === 新增：检测 400 错误并尝试自动压缩重试 ===
+		if handler := h.shouldAutoCompressOnError(reqCtx, resp.StatusCode, respBody); handler != nil {
+			// 构建上游 URL
+			path := c.Request.URL.Path
+			if h.gatewayPath != "" {
+				path = strings.TrimPrefix(path, h.gatewayPath)
+			}
+			upstreamURL := h.upstreamURL + path
+			if c.Request.URL.RawQuery != "" {
+				upstreamURL += "?" + c.Request.URL.RawQuery
+			}
+
+			// 执行压缩重试
+			success, retryResp, retryBody := h.handleAutoCompressRetry(c, reqCtx, handler, upstreamURL)
+
+			if success && retryResp != nil {
+				// 重试成功，使用重试响应
+				reqCtx.meta.Response = &ResponseMeta{
+					Status:  retryResp.StatusCode,
+					Headers: sanitizeHeaders(retryResp.Header),
+				}
+				reqCtx.respBody = retryBody
+				reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
+				reqCtx.forceLog = true
+
+				h.updateConnectionStatus(reqCtx.connInfo, "completed_after_compress_retry", reqCtx.meta.DurationMs)
+				if reqCtx.connInfo != nil {
+					reqCtx.connInfo.AppliedResponseTransformers = append(reqCtx.connInfo.AppliedResponseTransformers, "compress_retry:"+handler.Name)
+				}
+				h.saveLog(reqCtx)
+
+				// 返回重试响应
+				for key, values := range retryResp.Header {
+					for _, value := range values {
+						c.Header(key, value)
+					}
+				}
+				h.applyResponseHeaderInjections(c, reqCtx.tags, reqCtx)
+				c.Data(retryResp.StatusCode, retryResp.Header.Get("Content-Type"), retryBody)
+				return
+			}
+
+			// 压缩或重试失败，继续原有错误处理流程
+			h.logger.Info("compress retry failed, returning original error")
+		}
 
 		if handler := h.shouldTransformToContextError(reqCtx, resp.StatusCode, len(respBody)); handler != nil {
 			h.updateConnectionStatus(reqCtx.connInfo, "error_transformed", reqCtx.meta.DurationMs)
