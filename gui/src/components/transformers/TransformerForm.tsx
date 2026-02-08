@@ -72,7 +72,7 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
   
   // Compress fields
   const [compressTarget, setCompressTarget] = useState('same')
-  const [compressModel, setCompressModel] = useState('claude-3-5-sonnet-20241022')
+  const [compressModel, setCompressModel] = useState('')
   const [compressSystemPrompt, setCompressSystemPrompt] = useState('')
   const [compressUserPrompt, setCompressUserPrompt] = useState('')
   const [preserveBudget, setPreserveBudget] = useState(40000)
@@ -123,7 +123,7 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
       
       // Compress fields
       setCompressTarget(definition.compress_target || 'same')
-      setCompressModel(definition.compress_model || 'claude-3-5-sonnet-20241022')
+      setCompressModel(definition.compress_model || '')
       setCompressSystemPrompt(definition.compress_system_prompt || '')
       setCompressUserPrompt(definition.compress_user_prompt || '')
       setPreserveBudget(definition.preserve_budget || 40000)
@@ -153,7 +153,7 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
       setContextThresholdRatio(0.85)
       setTokenEstimateRatio(3.5)
       setCompressTarget('same')
-      setCompressModel('claude-3-5-sonnet-20241022')
+      setCompressModel('')
       setCompressSystemPrompt('')
       setCompressUserPrompt('')
       setPreserveBudget(40000)
@@ -181,7 +181,7 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
       setContextThresholdRatio(0.85)
       setTokenEstimateRatio(3.5)
       setCompressTarget('same')
-      setCompressModel('claude-3-5-sonnet-20241022')
+      setCompressModel('')
       setCompressSystemPrompt('')
       setCompressUserPrompt('')
       setPreserveBudget(40000)
@@ -697,8 +697,7 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
                         label="Compress Model"
                         value={compressModel}
                         onChange={(e) => setCompressModel(e.target.value)}
-                        placeholder="claude-3-5-sonnet-20241022"
-                        required
+                        placeholder="Leave empty to use original request model"
                       />
                       <div>
                         <label className="mb-1.5 block text-sm font-medium">Compress System Prompt (optional)</label>
@@ -715,7 +714,7 @@ export function TransformerForm({ open, onClose, definition }: TransformerFormPr
                           value={compressUserPrompt}
                           onChange={(e) => setCompressUserPrompt(e.target.value)}
                           className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                          placeholder="Leave empty to use default prompt"
+                          placeholder="Leave empty to use default prompt (appended after conversation history)"
                         />
                       </div>
                     </div>

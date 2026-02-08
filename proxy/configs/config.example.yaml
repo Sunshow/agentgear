@@ -239,10 +239,10 @@ transformers:
     #                                   # - "same": Use current gateway's upstream
     #                                   # - "gateway:name": Use specified gateway
     #                                   # - "url:https://...": Use custom URL
-    #   compress_model: "claude-3-5-sonnet-20241022"  # Model for compression
-    #   compress_system_prompt: |       # System prompt for compression (optional, has default)
+    #   compress_model: ""              # Model for compression (leave empty to use original request model)
+    #   compress_system_prompt: |       # System prompt for compression (optional, has default 13-part summary guidelines)
     #     You are an AI assistant specialized in summarizing conversation history...
-    #   compress_user_prompt: |         # User prompt for compression (optional, has default)
+    #   compress_user_prompt: |         # User prompt appended after history (optional, has default)
     #     Please read the complete conversation above and generate a summary...
     #   
     #   # Message splitting configuration

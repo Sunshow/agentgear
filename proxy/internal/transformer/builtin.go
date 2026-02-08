@@ -166,7 +166,7 @@ This prevents output truncation with long content.`,
 
 		// 压缩配置
 		CompressTarget: "same",
-		CompressModel:  "claude-3-5-sonnet-20241022",
+		CompressModel:  "", // 空字符串表示使用原请求的模型
 		CompressSystemPrompt: `You are an AI assistant specialized in summarizing conversation history.
 Read the complete conversation and generate a structured summary according to the following guidelines:
 
