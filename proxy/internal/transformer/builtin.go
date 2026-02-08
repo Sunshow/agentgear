@@ -233,39 +233,6 @@ Read the complete conversation and generate a structured summary according to th
 		Builtin: true,
 	},
 
-	// === 400 错误自动压缩重试转换器 ===
-	{
-		Name:        "$generic_400_auto_compress_retry",
-		Description: "通用 400 错误自动压缩重试（需手动配置映射）",
-		Type:        "auto_compress_on_error",
-		Direction:   "response",
-
-		// 错误检测
-		ErrorPatterns: []string{
-			"(?i)improperly formed request",
-			"(?i)input length",
-		},
-
-		// 压缩配置
-		CompressTarget:        "same",
-		CompressModel:         "",
-		ContextTokenLimit:     200000,
-		ContextThresholdRatio: 0.7,
-		TokenEstimateRatio:    3.5,
-		ModelContextLimits: []ModelContextLimit{
-			{ModelPattern: "claude-opus-4-6*", TokenLimit: 1000000},
-			{ModelPattern: "claude-opus-4.6*", TokenLimit: 1000000},
-		},
-		PreserveBudget: 40000,
-		SummaryBudget:  4000,
-
-		// 重试配置
-		AutoRetry:  true,
-		MaxRetries: 1,
-
-		Builtin: true,
-	},
-
 	// === 消息格式修正转换器 ===
 	{
 		Name:        "$generic_message_sanitize",
