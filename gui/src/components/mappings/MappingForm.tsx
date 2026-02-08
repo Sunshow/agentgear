@@ -74,6 +74,7 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
   const [description, setDescription] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [tags, setTags] = useState<string[]>([])
+  const [excludeTags, setExcludeTags] = useState<string[]>([])
   const [selectedGateways, setSelectedGateways] = useState<string[]>([])
   const [tools, setTools] = useState<string[]>([])
   const [toolOp, setToolOp] = useState<'all' | 'any'>('all')
@@ -130,6 +131,7 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
       setDescription(mapping.description || '')
       setEnabled(mapping.enabled)
       setTags(mapping.tags || [])
+      setExcludeTags(mapping.exclude_tags || [])
       setSelectedGateways(mapping.gateways || [])
       setTools(mapping.tools || [])
       setToolOp((mapping.tool_op as 'all' | 'any') || 'all')
@@ -139,6 +141,7 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
       setDescription('')
       setEnabled(true)
       setTags([])
+      setExcludeTags([])
       setSelectedGateways([])
       setTools([])
       setToolOp('all')
@@ -155,6 +158,7 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
       description: description || undefined,
       enabled,
       tags,
+      exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
       gateways: selectedGateways,
       tools: tools.length > 0 ? tools : undefined,
       tool_op: tools.length > 0 ? toolOp : undefined,
@@ -233,7 +237,26 @@ export function MappingForm({ open, onClose, mapping }: MappingFormProps) {
                 unstyled
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                Leave empty to match all requests
+                All specified tags must be present (AND logic)
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">Exclude Tags (conditions)</label>
+              <CreatableSelect<SelectOption, true>
+                isMulti
+                isClearable
+                options={availableTags.map((t) => ({ value: t, label: t }))}
+                value={excludeTags.map((t) => ({ value: t, label: t }))}
+                onChange={(opts) => setExcludeTags(opts.map((o) => o.value))}
+                onCreateOption={(inputValue) => setExcludeTags([...excludeTags, inputValue])}
+                placeholder="Select or type tags to exclude..."
+                classNames={selectClassNames}
+                components={{ Option: CustomOption }}
+                unstyled
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                None of these tags must be present (NOT logic)
               </p>
             </div>
 

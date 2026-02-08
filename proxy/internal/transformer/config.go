@@ -70,6 +70,7 @@ type MappingRule struct {
 	Description string   `mapstructure:"description" json:"description,omitempty" yaml:"description,omitempty"`
 	Enabled     bool     `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
 	Tags        []string `mapstructure:"tags" json:"tags" yaml:"tags"`
+	ExcludeTags []string `mapstructure:"exclude_tags" json:"exclude_tags,omitempty" yaml:"exclude_tags,omitempty"` // Tags that must NOT be present
 	Gateways    []string `mapstructure:"gateways" json:"gateways" yaml:"gateways"`
 	Tools       []string `mapstructure:"tools" json:"tools,omitempty" yaml:"tools,omitempty"`       // Tool names to match
 	ToolOp      string   `mapstructure:"tool_op" json:"tool_op,omitempty" yaml:"tool_op,omitempty"` // "all" (default) or "any"

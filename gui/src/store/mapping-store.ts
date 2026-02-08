@@ -6,6 +6,7 @@ export interface MappingRule {
   description?: string
   enabled: boolean
   tags: string[]
+  exclude_tags?: string[]
   gateways: string[]
   tools?: string[]
   tool_op?: string

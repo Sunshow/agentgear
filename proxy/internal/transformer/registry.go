@@ -120,7 +120,7 @@ func (r *Registry) findTransformerWithInput(toolName, direction string, tags []s
 		if !m.Enabled {
 			continue
 		}
-		if !r.matchTags(m.Tags, tags) {
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
 			continue
 		}
 		// Find the referenced definition
@@ -191,7 +191,7 @@ func (r *Registry) MayNeedAccumulate(toolName string, tags []string) bool {
 		if !m.Enabled {
 			continue
 		}
-		if !r.matchTags(m.Tags, tags) {
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
 			continue
 		}
 		for j := range r.definitions {
@@ -214,7 +214,7 @@ func (r *Registry) HasPendingTransform(toolName string, tags []string) bool {
 		if !m.Enabled {
 			continue
 		}
-		if !r.matchTags(m.Tags, tags) {
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
 			continue
 		}
 		for j := range r.definitions {
@@ -242,21 +242,31 @@ func (r *Registry) defToConfig(def *TransformerDef, mapping *MappingRule) *Trans
 	}
 }
 
-func (r *Registry) matchTags(transformerTags, requestTags []string) bool {
-	if len(transformerTags) == 0 {
-		return true
-	}
-
+func (r *Registry) matchTags(transformerTags, excludeTags, requestTags []string) bool {
+	// Build request tag set once
 	tagSet := make(map[string]bool)
 	for _, t := range requestTags {
 		tagSet[t] = true
 	}
 
-	for _, t := range transformerTags {
-		if !tagSet[t] {
-			return false
+	// Check required tags (all must be present)
+	if len(transformerTags) > 0 {
+		for _, t := range transformerTags {
+			if !tagSet[t] {
+				return false
+			}
 		}
 	}
+
+	// Check excluded tags (none must be present)
+	if len(excludeTags) > 0 {
+		for _, t := range excludeTags {
+			if tagSet[t] {
+				return false
+			}
+		}
+	}
+
 	return true
 }
 
@@ -534,7 +544,7 @@ func (r *Registry) GetMessageInjectTransformers(tags []string) []*MessageInjectR
 		if !m.Enabled {
 			continue
 		}
-		if !r.matchTags(m.Tags, tags) {
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
 			continue
 		}
 		matched, matchedTools := r.matchTools(m.Tools, m.ToolOp, tags)
@@ -567,7 +577,7 @@ func (r *Registry) GetErrorTransformer(tags []string) *TransformerDef {
 		if !m.Enabled {
 			continue
 		}
-		if !r.matchTags(m.Tags, tags) {
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
 			continue
 		}
 		// Find the referenced definition
@@ -593,7 +603,7 @@ func (r *Registry) GetHeaderInjectTransformers(direction string, tags []string) 
 		if !m.Enabled {
 			continue
 		}
-		if !r.matchTags(m.Tags, tags) {
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
 			continue
 		}
 		// Find the referenced definition
@@ -620,7 +630,7 @@ func (r *Registry) GetErrorPatternTransformer(tags []string, respBody string) *T
 		if !m.Enabled {
 			continue
 		}
-		if !r.matchTags(m.Tags, tags) {
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
 			continue
 		}
 		// Find the referenced definition
@@ -653,7 +663,7 @@ func (r *Registry) GetCompressTransformer(tags []string) *TransformerDef {
 		if !m.Enabled {
 			continue
 		}
-		if !r.matchTags(m.Tags, tags) {
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
 			continue
 		}
 		// Find the referenced definition

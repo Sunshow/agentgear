@@ -260,6 +260,7 @@ transformers:
     #   description: "Apply create_documents transform for Droid via WARP"
     #   enabled: true
     #   tags: ["$a_droid"]              # Required tags (all must match)
+    #   exclude_tags: []                # Excluded tags (none must match, optional)
     #   gateways: ["warp-proxy"]        # Required gateways (any must match)
     #   transformer: "create_documents_to_ExitSpecMode"
     
@@ -269,4 +270,20 @@ transformers:
     #   enabled: true
     #   tags: ["$a_droid"]              # Apply to requests with these tags
     #   transformer: "$auto_compress"   # Use builtin compress transformer
+    
+    # Example: Apply to Droid but exclude WARP gateway
+    # - name: "droid_non_warp_mapping"
+    #   description: "Apply to Droid agent but exclude WARP gateway"
+    #   enabled: true
+    #   tags: ["$a_droid"]              # Required: must have Droid agent tag
+    #   exclude_tags: ["$u_warp"]       # Excluded: must NOT have WARP gateway tag
+    #   transformer: "my_transformer"
+    
+    # Example: Apply to all requests except specific agent
+    # - name: "exclude_specific_agent"
+    #   description: "Apply to all except Cursor agent"
+    #   enabled: true
+    #   tags: []                        # Empty = match all
+    #   exclude_tags: ["$a_cursor"]     # Exclude Cursor agent
+    #   transformer: "another_transformer"
 
