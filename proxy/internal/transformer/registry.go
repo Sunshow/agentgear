@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"go.uber.org/zap"
 )
 
 type Registry struct {
@@ -687,7 +689,7 @@ func (r *Registry) GetErrorPatternTransformer(tags []string, respBody string) *T
 }
 
 // GetMessageSanitizer returns the first message_sanitize transformer matching tags
-func (r *Registry) GetMessageSanitizer(tags []string) *MessageSanitizer {
+func (r *Registry) GetMessageSanitizer(tags []string, logger *zap.Logger) *MessageSanitizer {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -702,7 +704,7 @@ func (r *Registry) GetMessageSanitizer(tags []string) *MessageSanitizer {
 		for j := range r.definitions {
 			d := &r.definitions[j]
 			if d.Name == m.Transformer && d.Type == "message_sanitize" {
-				return NewMessageSanitizer(d, r.logger)
+				return NewMessageSanitizer(d, logger)
 			}
 		}
 	}

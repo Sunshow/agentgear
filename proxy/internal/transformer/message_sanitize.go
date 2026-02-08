@@ -21,6 +21,11 @@ func NewMessageSanitizer(def *TransformerDef, logger *zap.Logger) *MessageSaniti
 	}
 }
 
+// Name returns the transformer definition name
+func (s *MessageSanitizer) Name() string {
+	return s.def.Name
+}
+
 // Sanitize fixes message format issues
 func (s *MessageSanitizer) Sanitize(reqBody []byte) ([]byte, bool, error) {
 	var req map[string]interface{}

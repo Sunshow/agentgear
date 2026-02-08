@@ -302,7 +302,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 	}
 
 	// 消息格式修正（在发送前）
-	if sanitizer := h.transformerRegistry.GetMessageSanitizer(reqCtx.tags); sanitizer != nil {
+	if sanitizer := h.transformerRegistry.GetMessageSanitizer(reqCtx.tags, h.logger); sanitizer != nil {
 		sanitizedReq, sanitized, err := sanitizer.Sanitize(transformedReqBody)
 		if err != nil {
 			h.logger.Error("message sanitization failed", zap.Error(err))
@@ -313,7 +313,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 			if connInfo != nil {
 				connInfo.TransformedRequest = true
 				connInfo.TransformedRequestBody = sanitizedReq
-				connInfo.AppliedRequestTransformers = append(connInfo.AppliedRequestTransformers, "sanitize:"+sanitizer.def.Name)
+				connInfo.AppliedRequestTransformers = append(connInfo.AppliedRequestTransformers, "sanitize:"+sanitizer.Name())
 			}
 		}
 	}
