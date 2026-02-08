@@ -76,7 +76,7 @@ memory:
 # Tags can be used to conditionally apply transformers.
 #
 # Tag naming conventions:
-# - System tags: Start with $ (e.g., $a_droid, $u_warp), auto-generated
+# - System tags: Start with $ (e.g., $a_droid, $a_opencode, $u_warp), auto-generated
 # - User tags: Start with letter or _, contain only letters/numbers/_
 #
 # Priority: Smaller value = higher priority (evaluated first)

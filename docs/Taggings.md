@@ -14,7 +14,7 @@ Tagging 系统是 AgentGear 的核心功能之一，用于根据请求特征自�
 
 | 前缀 | 类型 | 含义 | 示例 | 生成方式 |
 |------|------|------|------|----------|
-| `$a_` | Agent | 客户端/Agent 类型 | `$a_droid` | Builtin 规则 |
+| `$a_` | Agent | 客户端/Agent 类型 | `$a_droid`, `$a_opencode` | Builtin 规则 |
 | `$p_` | Protocol | 协议类型 | `$p_anthropic` | Builtin 规则 |
 | `$u_` | Upstream | 上游服务类型 | `$u_warp`, `$u_kiro` | Gateway 配置 |
 | `$g_` | Gateway | 网关标识 | `$g_mygateway` | Gateway 配置 |
@@ -90,6 +90,24 @@ matchers:
       value: "^factory-cli/\\d+\\.\\d+\\.\\d+"
 tags:
   - "$a_droid"
+```
+
+### $A_OpenCode
+
+检测 OpenCode 客户端：
+
+```yaml
+name: "$A_OpenCode"
+priority: -1000
+builtin: true
+matchers:
+  - type: header
+    key: "User-Agent"
+    match:
+      op: regex
+      value: "^opencode/\\d+\\.\\d+\\.\\d+"
+tags:
+  - "$a_opencode"
 ```
 
 ### $P_Anthropic

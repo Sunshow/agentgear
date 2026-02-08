@@ -18,6 +18,22 @@ var BuiltinRules = []Rule{
 		Tags: []string{"$a_droid"},
 	},
 	{
+		Name:     "$A_OpenCode",
+		Priority: -1000,
+		Builtin:  true,
+		Matchers: []Matcher{
+			{
+				Type: MatcherTypeHeader,
+				Key:  "User-Agent",
+				Match: ValueMatcher{
+					Op:    MatchOpRegex,
+					Value: `^opencode/\d+\.\d+\.\d+`,
+				},
+			},
+		},
+		Tags: []string{"$a_opencode"},
+	},
+	{
 		Name:     "$P_Anthropic",
 		Priority: -1000,
 		Builtin:  true,
