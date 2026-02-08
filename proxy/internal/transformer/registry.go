@@ -686,6 +686,29 @@ func (r *Registry) GetErrorPatternTransformer(tags []string, respBody string) *T
 	return nil
 }
 
+// GetMessageSanitizer returns the first message_sanitize transformer matching tags
+func (r *Registry) GetMessageSanitizer(tags []string) *MessageSanitizer {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
+			continue
+		}
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Type == "message_sanitize" {
+				return NewMessageSanitizer(d, r.logger)
+			}
+		}
+	}
+	return nil
+}
+
 // GetCompressTransformer returns the first compress type transformer that matches the given tags
 func (r *Registry) GetCompressTransformer(tags []string) *TransformerDef {
 	r.mu.RLock()
