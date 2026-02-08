@@ -443,8 +443,9 @@ func (h *CompressHandler) ReplaceMessages(originalReq []byte, summary string, su
 }
 
 // Process executes the complete compression flow
-func (h *CompressHandler) Process(reqBody []byte, targetURL string, headers map[string]string) (compressedReq []byte, compressed bool, err error) {
-	h.logger.Info("starting compression process")
+// When force=true, skip ShouldCompress check (used by auto_compress_on_error)
+func (h *CompressHandler) Process(reqBody []byte, targetURL string, headers map[string]string, force bool) (compressedReq []byte, compressed bool, err error) {
+	h.logger.Info("starting compression process", zap.Bool("force", force))
 
 	// Parse original request
 	var req map[string]interface{}
@@ -478,8 +479,8 @@ func (h *CompressHandler) Process(reqBody []byte, targetURL string, headers map[
 		model = m
 	}
 
-	// Check if compression is needed
-	if !h.ShouldCompress(reqBody, model) {
+	// Check if compression is needed (skip when force=true)
+	if !force && !h.ShouldCompress(reqBody, model) {
 		h.logger.Info("compression not needed")
 		return reqBody, false, nil
 	}

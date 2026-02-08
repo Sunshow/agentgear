@@ -279,7 +279,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 			}
 			
 			// 执行压缩
-			compressedReq, compressed, err := compressor.Process(transformedReqBody, compressURL, compressHeaders)
+			compressedReq, compressed, err := compressor.Process(transformedReqBody, compressURL, compressHeaders, false)
 			if err != nil {
 				h.logger.Error("compression failed", zap.Error(err))
 				// 压缩失败，继续使用原请求（降级处理）
@@ -804,8 +804,8 @@ func (h *Handler) handleAutoCompressRetry(c *gin.Context, reqCtx *requestContext
 		}
 	}
 
-	// 4. 执行压缩
-	compressedReq, compressed, err := compressor.Process(reqCtx.transformedReqBody, compressURL, compressHeaders)
+	// 4. 执行压缩（force=true，跳过大小检查）
+	compressedReq, compressed, err := compressor.Process(reqCtx.transformedReqBody, compressURL, compressHeaders, true)
 	if err != nil || !compressed {
 		h.logger.Error("compression failed", zap.Error(err), zap.Bool("compressed", compressed))
 		return false, nil, nil
