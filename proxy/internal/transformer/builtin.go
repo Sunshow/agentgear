@@ -134,20 +134,6 @@ This prevents output truncation with long content.`,
 		TokenEstimateRatio:    3.5,
 		Builtin:               true,
 	},
-	{
-		Name:         "$input_too_long_error_transform",
-		Description:  "检测上游返回的 input too long / improperly formed 错误，转换为友好提示",
-		Direction:    "response",
-		Type:         "error_transform",
-		ErrorCode:    "context_length_exceeded",
-		ErrorMessage: "Input is too long: your conversation context likely exceeds the model's maximum token limit. Try starting a new session or reducing the conversation history",
-		ErrorPatterns: []string{
-			"(?i)input length",
-			"(?i)improperly formed request",
-		},
-		Builtin: true,
-	},
-
 	// === 压缩类型转换器 ===
 	{
 		Name:        "$auto_compress",
@@ -324,15 +310,6 @@ var BuiltinMappings = []MappingRule{
 		Enabled:     true,
 		Tags:        []string{"$a_droid", "$u_kiro"},
 		Transformer: "$droid_upstream_kiro_force_compress",
-		Builtin:     true,
-	},
-	// Droid + Kiro input too long 错误模式匹配
-	{
-		Name:        "$droid_upstream_kiro_input_too_long_mapping",
-		Description: "Droid+Kiro: 匹配 input too long / improperly formed 错误并转换为友好提示",
-		Enabled:     true,
-		Tags:        []string{"$a_droid", "$u_kiro"},
-		Transformer: "$input_too_long_error_transform",
 		Builtin:     true,
 	},
 }
