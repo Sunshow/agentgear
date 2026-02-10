@@ -47,6 +47,7 @@ type TransformerDef struct {
 	ModelContextLimits    []ModelContextLimit `mapstructure:"model_context_limits" json:"model_context_limits,omitempty" yaml:"model_context_limits,omitempty"`
 	ContextThresholdRatio float64             `mapstructure:"context_threshold_ratio" json:"context_threshold_ratio,omitempty" yaml:"context_threshold_ratio,omitempty"`
 	TokenEstimateRatio    float64             `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
+	ImageTokenEstimate    int                 `mapstructure:"image_token_estimate" json:"image_token_estimate,omitempty" yaml:"image_token_estimate,omitempty"` // 单张图片估算 token 数，默认 1600
 	ParamConditions       []ParamCondition    `mapstructure:"param_conditions" json:"param_conditions,omitempty" yaml:"param_conditions,omitempty"`
 	HeaderInjections      []HeaderInjection   `mapstructure:"header_injections" json:"header_injections,omitempty" yaml:"header_injections,omitempty"`
 	// compress 类型专用字段

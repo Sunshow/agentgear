@@ -143,6 +143,7 @@ var BuiltinDefinitions = []TransformerDef{
 		ContextTokenLimit:     200000, // 所有模型统一使用 200K token 限制
 		ContextThresholdRatio: 0.7,    // 70% 触发（更早压缩）
 		TokenEstimateRatio:    3.5,
+		ImageTokenEstimate:    1600, // 单张图片估算 1600 tokens
 		Builtin:               true,
 	},
 	// === 压缩类型转换器 ===
@@ -226,6 +227,9 @@ Read the complete conversation and generate a structured summary according to th
 		// 压缩后处理
 		AutoRetry:  true,
 		MaxRetries: 1,
+
+		// 图片处理
+		ImageTokenEstimate: 1600, // 单张图片估算 1600 tokens
 
 		Builtin: true,
 	},

@@ -545,8 +545,10 @@ func (h *Handler) shouldTransformToContextError(reqCtx *requestContext, respStat
 	log.Printf("[ERROR_TRANSFORM] Request size info: transformer=%s request_size=%d threshold=%d response_status=%d response_body_len=%d",
 		handler.Name, len(reqCtx.reqBody), handler.RequestSizeThreshold, respStatus, respBodyLen)
 
-	// 检查请求大小是否超过阈值
-	if handler.RequestSizeThreshold > 0 && len(reqCtx.reqBody) >= handler.RequestSizeThreshold {
+	// 检查请求大小是否超过阈值（排除图片 base64 数据）
+	effectiveSize, _ := transformer.EstimateRequestSizeExcludingImages(
+		reqCtx.reqBody, handler.ImageTokenEstimate, handler.TokenEstimateRatio)
+	if handler.RequestSizeThreshold > 0 && effectiveSize >= handler.RequestSizeThreshold {
 		return handler
 	}
 
@@ -731,13 +733,19 @@ func (h *Handler) shouldPreemptContextError(reqCtx *requestContext) *transformer
 		thresholdRatio = 0.85
 	}
 
-	// 估算 token 数
-	estimatedTokens := float64(len(reqCtx.reqBody)) / ratio
+	// 估算 token 数（排除图片 base64 数据）
+	effectiveSize, imageCount := transformer.EstimateRequestSizeExcludingImages(
+		reqCtx.reqBody, handler.ImageTokenEstimate, ratio)
+	if imageCount > 0 {
+		log.Printf("[ERROR_TRANSFORM] Image-aware estimation: images=%d original_size=%d effective_size=%d",
+			imageCount, len(reqCtx.reqBody), effectiveSize)
+	}
+	estimatedTokens := float64(effectiveSize) / ratio
 	threshold := float64(contextTokenLimit) * thresholdRatio
 
 	if estimatedTokens > threshold {
-		log.Printf("[ERROR_TRANSFORM] Preemptive context limit check triggered: transformer=%s model=%s request_size=%d estimated_tokens=%.0f threshold=%.0f context_token_limit=%d",
-			handler.Name, model, len(reqCtx.reqBody), estimatedTokens, threshold, contextTokenLimit)
+		log.Printf("[ERROR_TRANSFORM] Preemptive context limit check triggered: transformer=%s model=%s request_size=%d effective_size=%d estimated_tokens=%.0f threshold=%.0f context_token_limit=%d",
+			handler.Name, model, len(reqCtx.reqBody), effectiveSize, estimatedTokens, threshold, contextTokenLimit)
 		return handler
 	}
 

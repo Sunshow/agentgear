@@ -58,12 +58,17 @@ func (h *CompressHandler) ShouldCompress(reqBody []byte, model string) bool {
 		return false
 	}
 
-	// Estimate tokens
-	estimatedTokens := h.estimateTokens(reqBody)
+	// Estimate tokens (排除图片 base64 数据)
+	effectiveSize, imageCount := EstimateRequestSizeExcludingImages(
+		reqBody, h.def.ImageTokenEstimate, h.def.TokenEstimateRatio)
+	estimatedTokens := int(float64(effectiveSize) / h.def.TokenEstimateRatio)
 	threshold := float64(tokenLimit) * h.def.ContextThresholdRatio
 
 	h.logger.Info("compress check",
 		zap.Int("estimated_tokens", estimatedTokens),
+		zap.Int("image_count", imageCount),
+		zap.Int("original_size", len(reqBody)),
+		zap.Int("effective_size", effectiveSize),
 		zap.Int("token_limit", tokenLimit),
 		zap.Float64("threshold_ratio", h.def.ContextThresholdRatio),
 		zap.Float64("threshold", threshold),

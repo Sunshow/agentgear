@@ -207,6 +207,7 @@ transformers:
     #       token_limit: 1000000
     #   context_threshold_ratio: 0.85  # Trigger at 85% of limit
     #   token_estimate_ratio: 3.5      # Bytes to tokens estimation ratio
+    #   image_token_estimate: 1600     # Single image token estimate (default 1600, Anthropic medium-size image ~1600 tokens)
 
     # Example: Override builtin $droid_upstream_kiro_force_compress to adjust threshold
     # - name: "$droid_upstream_kiro_force_compress"
@@ -219,6 +220,7 @@ transformers:
     #   context_token_limit: 200000
     #   context_threshold_ratio: 0.6  # Override: 60% instead of default 70%
     #   token_estimate_ratio: 3.5
+    #   image_token_estimate: 1600     # Single image token estimate (default 1600)
     #   model_context_limits:
     #     - model_pattern: "claude-opus-4-6*"
     #       token_limit: 1000000
@@ -253,6 +255,7 @@ transformers:
     #       token_limit: 1000000
     #   context_threshold_ratio: 0.7    # Trigger at 70% of limit
     #   token_estimate_ratio: 3.5       # Bytes to tokens estimation ratio
+    #   image_token_estimate: 1600      # Single image token estimate (default 1600)
     #   
     #   # Compression configuration
     #   compress_target: "same"         # "same" | "gateway:name" | "url:https://..."
@@ -281,6 +284,7 @@ transformers:
     #   context_token_limit: 200000
     #   context_threshold_ratio: 0.5  # Override: 50% instead of default 70%
     #   token_estimate_ratio: 3.5
+    #   image_token_estimate: 1600     # Single image token estimate (default 1600)
     #   model_context_limits:
     #     - model_pattern: "claude-opus-4-6*"
     #       token_limit: 1000000
