@@ -78,6 +78,21 @@ transformers:
 
 **效果**：即使有同名 transformer 定义，也不会应用到任何请求。
 
+### 场景 4：调整分段写入提示的行数阈值
+
+```yaml
+transformers:
+  definitions:
+    # 覆盖内置的 $upstream_kiro_chunked_write_hint，调整行数阈值
+    - name: "$upstream_kiro_chunked_write_hint"
+      template_ref: "$tpl_chunked_write_hint"
+      template_args:
+        line_threshold: "300"  # 从默认 150 行调整为 300 行
+        chunk_size: "200"      # 从默认 100 行调整为 200 行
+```
+
+**效果**：当文件超过 300 行时提示分段写入，每块约 200 行。内置 mapping 自动生效，无需额外配置。
+
 ## 阈值参考表
 
 | 阈值 | 200K 模型触发点 | 1M 模型触发点 | 适用场景 |
@@ -139,6 +154,63 @@ cd proxy
 - `$droid_warp_Execute_to_Bash` - Execute 转 Bash
 
 ### Message Inject 类型
-- `$upstream_kiro_chunked_write_hint` - 分段写入提示
+- `$upstream_kiro_chunked_write_hint` - 分段写入提示（基于模板 `$tpl_chunked_write_hint`，默认 150 行/100 行分块）
+
+### 模板列表
+
+可用于创建自定义实例的内置模板：
+
+- `$tpl_tool_alias` - 工具别名模板（参数：`direction`, `source`, `target`）
+- `$tpl_chunked_write_hint` - 分段写入提示模板（参数：`line_threshold`, `chunk_size`）
+
+## 使用模板自定义分段写入提示
+
+内置的 `$upstream_kiro_chunked_write_hint` 默认提示文件超过 150 行时分段写入，每块约 100 行。你可以通过模板创建自定义实例，配置不同的阈值。
+
+### 示例：自定义行数阈值
+
+```yaml
+transformers:
+  definitions:
+    # 更激进的阈值：100 行触发，每块 50 行
+    - name: "my_chunked_write_aggressive"
+      template_ref: "$tpl_chunked_write_hint"
+      template_args:
+        line_threshold: "100"
+        chunk_size: "50"
+
+    # 更宽松的阈值：200 行触发，每块 150 行
+    - name: "my_chunked_write_relaxed"
+      template_ref: "$tpl_chunked_write_hint"
+      template_args:
+        line_threshold: "200"
+        chunk_size: "150"
+
+  mappings:
+    # 为特定 Agent 使用激进配置
+    - name: "my_agent_chunked_write"
+      enabled: true
+      tags: ["$a_my_agent", "$u_kiro"]
+      tools: ["Create", "Write"]
+      tool_op: "any"
+      transformer: "my_chunked_write_aggressive"
+
+    # 禁用内置的默认分段写入提示（可选）
+    - name: "$upstream_kiro_chunked_write"
+      enabled: false
+      tags: ["$u_kiro"]
+      tools: ["Create", "Write"]
+      tool_op: "any"
+      transformer: "$upstream_kiro_chunked_write_hint"
+```
+
+### 模板参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `line_threshold` | 文件超过多少行时触发分段写入 | 150 |
+| `chunk_size` | 每次 Edit 调用的建议行数 | 100 |
+
+> **注意**：模板中的 `{{tool}}` 占位符会在实际注入时根据匹配的工具名自动替换，无需在 `template_args` 中配置。
 
 完整列表请参考 `proxy/internal/transformer/builtin.go`。

@@ -11,6 +11,19 @@ var BuiltinTemplates = []TransformerDef{
 		IsTemplate:  true,
 		Builtin:     true,
 	},
+	{
+		Name:         "$tpl_chunked_write_hint",
+		Description:  "分段写入提示模板：可配置行数阈值和分块大小",
+		Type:         "message_inject",
+		Direction:    "request",
+		InjectFormat: "system-reminder",
+		InjectText: `IMPORTANT: When using the {{tool}} tool to create files, if the content exceeds {{line_threshold}} lines:
+1. First create the file with a skeleton (imports, class/function signatures, brief TODO comments)
+2. Then use multiple Edit tool calls to add the implementation in chunks of ~{{chunk_size}} lines each
+This prevents output truncation with long content.`,
+		IsTemplate: true,
+		Builtin:    true,
+	},
 }
 
 // BuiltinDefinitions defines built-in transformer definitions
@@ -108,15 +121,13 @@ var BuiltinDefinitions = []TransformerDef{
 
 	// === 消息注入类型转换器 ===
 	{
-		Name:         "$upstream_kiro_chunked_write_hint",
-		Description:  "Upstream Kiro: 提示模型分段创建长文件，避免输出截断",
-		Direction:    "request",
-		Type:         "message_inject",
-		InjectFormat: "system-reminder",
-		InjectText: `IMPORTANT: When using the {{tool}} tool to create files, if the content exceeds 150 lines:
-1. First create the file with a skeleton (imports, class/function signatures, brief TODO comments)
-2. Then use multiple Edit tool calls to add the implementation in chunks of ~100 lines each
-This prevents output truncation with long content.`,
+		Name:        "$upstream_kiro_chunked_write_hint",
+		Description: "Upstream Kiro: 提示模型分段创建长文件，避免输出截断",
+		TemplateRef: "$tpl_chunked_write_hint",
+		TemplateArgs: map[string]string{
+			"line_threshold": "150",
+			"chunk_size":     "100",
+		},
 		Builtin: true,
 	},
 

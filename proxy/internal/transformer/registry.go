@@ -109,6 +109,16 @@ func (r *Registry) resolveTemplate(def *TransformerDef) *TransformerDef {
 	if len(tpl.ParamMapping) > 0 && len(resolved.ParamMapping) == 0 {
 		resolved.ParamMapping = tpl.ParamMapping
 	}
+	// Resolve message_inject fields from template
+	if tpl.Type != "" && resolved.Type == "" {
+		resolved.Type = tpl.Type
+	}
+	if tpl.InjectFormat != "" && resolved.InjectFormat == "" {
+		resolved.InjectFormat = tpl.InjectFormat
+	}
+	if tpl.InjectText != "" && resolved.InjectText == "" {
+		resolved.InjectText = replacePlaceholder(tpl.InjectText, def.TemplateArgs)
+	}
 	// Clear template ref after resolution
 	resolved.TemplateRef = ""
 	resolved.TemplateArgs = nil
