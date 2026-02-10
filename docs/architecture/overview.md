@@ -1,5 +1,4 @@
-<coding_guidelines>
-# AgentGear 开发指南
+# AgentGear 架构总览
 
 ## 项目定位
 
@@ -31,36 +30,16 @@ agentgear/
 └── docker-compose.yaml
 ```
 
-## 核心规则
+## 核心功能
 
-1. 敏感头信息（Authorization, X-Api-Key, Anthropic-Api-Key）需脱敏
-2. 流式响应需要累积工具调用的所有 delta 后再转换
-3. 会话 ID 通过 `X-Session-Id` 请求头传递，没有则自动生成
-4. 内存存储有容量限制，自动淘汰旧连接
-5. GUI 对话框**禁止**使用手写的 `fixed inset-0` modal 实现，必须使用 `ResizableDialog`
-6. GUI 优先使用项目已有的 UI 组件（Button, Input, Checkbox, Select, Tabs, ScrollArea），而非原生 HTML 元素
+1. **透明代理** - 转发 API 请求到上游 (端口 9000)
+2. **内部 API** - 管理和监控接口 (端口 9001)
+3. **内存存储** - 连接信息存储，支持实时查看
+4. **标签系统** - 根据请求特征自动打标签
+5. **工具转换** - 基于标签的配置化转换
+6. **流式支持** - SSE 流式响应处理和转换
 
-## 文档查阅指引
-
-在开发前，根据你要修改的模块查阅对应的详细文档：
-
-| 修改内容 | 查阅文档 |
-|---------|---------|
-| 项目架构、模块关系 | `docs/architecture/overview.md` |
-| 标签系统（Tagging） | `docs/core-features/tagging.md` |
-| 转换器（Transformer） | `docs/core-features/transformers.md` |
-| 流式处理 | `docs/core-features/streaming.md` |
-| 内部 API 接口 | `docs/core-features/internal-api.md` |
-| 部署与构建 | `docs/integration/deployment.md` |
-| 上下文压缩 | `docs/integration/compression.md` |
-| GUI 对话框开发 | `docs/gui/dialogs.md` |
-| GUI 组件使用 | `docs/gui/components.md` |
-
-> **核心规则：渐进式文档发现**
-> AGENTS.md 仅保留核心规则和文档索引。详细的设计文档、配置示例、API 说明等内容
-> 存放在 `docs/` 对应子目录中。新增文档时，应放入合适的子目录并在此表格中添加索引。
-
-## 架构概览
+## 架构图
 
 ```
 ┌─────────────┐     ┌─────────────────────────────────┐     ┌─────────────┐
@@ -82,4 +61,27 @@ agentgear/
                     │  - 标签规则配置                  │
                     └─────────────────────────────────┘
 ```
-</coding_guidelines>
+
+## 模块职责
+
+### Proxy 模块 (`proxy/`)
+Go 语言实现的核心代理服务，负责：
+- 接收本地 Agent 的 API 请求并转发到上游
+- 通过标签系统识别请求来源
+- 通过转换器引擎对请求/响应进行转换
+- 提供内部 API 用于管理和监控
+- 内存存储连接信息，支持实时查看
+
+### GUI 模块 (`gui/`)
+基于 Tauri + React 的桌面图形界面，提供：
+- 连接监控：实时查看代理连接状态
+- 转换器管理：配置和管理转换规则
+- 标签规则配置：设置请求匹配规则
+- 可连接本地或远程 CLI 服务
+
+### 文档 (`docs/`)
+项目文档按以下分类组织：
+- `architecture/` - 架构相关文档
+- `core-features/` - 核心功能详细文档（标签、转换器、流式处理、API）
+- `integration/` - 集成与部署文档（部署、压缩、上下文管理）
+- `gui/` - GUI 开发规范（对话框、组件）
