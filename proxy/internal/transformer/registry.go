@@ -747,6 +747,33 @@ func (r *Registry) GetMessageSanitizer(tags []string, logger *zap.Logger) *Messa
 	return nil
 }
 
+// GetContentReplacerDefs returns all content_replace type transformer definitions that match the given tags
+func (r *Registry) GetContentReplacerDefs(tags []string) []*TransformerDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*TransformerDef
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
+			continue
+		}
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Type == "content_replace" && d.Direction == "response" && len(d.ContentPatterns) > 0 {
+				result = append(result, d)
+				break
+			}
+		}
+	}
+
+	return result
+}
+
 // GetCompressTransformer returns the first compress type transformer that matches the given tags
 func (r *Registry) GetCompressTransformer(tags []string) *TransformerDef {
 	r.mu.RLock()

@@ -6,6 +6,13 @@ type ParamMapping struct {
 	Transform string `mapstructure:"transform" json:"transform,omitempty" yaml:"transform,omitempty"`
 }
 
+// ContentReplacePattern defines a text replacement rule for response content
+type ContentReplacePattern struct {
+	Match       string `mapstructure:"match" json:"match" yaml:"match"`                               // Marker text to match, e.g. "【TIMICC】"
+	ReplaceWith string `mapstructure:"replace_with" json:"replace_with" yaml:"replace_with"`           // Replacement text (empty string = delete)
+	TrimAfter   string `mapstructure:"trim_after" json:"trim_after,omitempty" yaml:"trim_after,omitempty"` // Extend match forward until this separator, e.g. "\n\n"
+}
+
 // ParamCondition defines a condition for matching tool parameters
 type ParamCondition struct {
 	Param string `mapstructure:"param" json:"param" yaml:"param"` // 参数路径，如 "file_path"
@@ -48,6 +55,7 @@ type TransformerDef struct {
 	ContextThresholdRatio float64             `mapstructure:"context_threshold_ratio" json:"context_threshold_ratio,omitempty" yaml:"context_threshold_ratio,omitempty"`
 	TokenEstimateRatio    float64             `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
 	ImageTokenEstimate    int                 `mapstructure:"image_token_estimate" json:"image_token_estimate,omitempty" yaml:"image_token_estimate,omitempty"` // 单张图片估算 token 数，默认 1600
+	ContentPatterns       []ContentReplacePattern `mapstructure:"content_patterns" json:"content_patterns,omitempty" yaml:"content_patterns,omitempty"`
 	ParamConditions       []ParamCondition    `mapstructure:"param_conditions" json:"param_conditions,omitempty" yaml:"param_conditions,omitempty"`
 	HeaderInjections      []HeaderInjection   `mapstructure:"header_injections" json:"header_injections,omitempty" yaml:"header_injections,omitempty"`
 	// compress 类型专用字段

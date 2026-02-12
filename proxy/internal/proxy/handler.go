@@ -1297,6 +1297,13 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 	nextOutputIndex := 0
 	hasContentBlock := false
 
+	// Initialize content replacer definitions for text blocks
+	var contentReplacerDefs []*transformer.TransformerDef
+	if h.transformerRegistry != nil {
+		contentReplacerDefs = h.transformerRegistry.GetContentReplacerDefs(reqCtx.tags)
+	}
+	textBlockReplacers := make(map[int][]*transformer.ContentReplacer)
+
 	writeEvents := func(events []sseEvent) {
 		for _, evt := range events {
 			outLine := fmt.Sprintf("event: %s\ndata: %s\n\n", evt.eventType, evt.data)
@@ -1311,7 +1318,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		if firstEvent.eventType == "content_block_start" {
 			hasContentBlock = true
 		}
-		outputEvents := h.processSSEEvent(firstEvent.eventType, firstEvent.data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx)
+		outputEvents := h.processSSEEvent(firstEvent.eventType, firstEvent.data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers)
 		writeEvents(outputEvents)
 	}
 
@@ -1347,7 +1354,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 					hasContentBlock = true
 				}
 
-				outputEvents := h.processSSEEvent(eventType, data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx)
+				outputEvents := h.processSSEEvent(eventType, data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers)
 				writeEvents(outputEvents)
 			}
 			_, _ = reader.ReadString('\n')
@@ -1404,14 +1411,14 @@ type sseEvent struct {
 	data      string
 }
 
-func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, pendingMessageDelta **sseEvent, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext) []sseEvent {
+func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, pendingMessageDelta **sseEvent, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext, contentReplacerDefs []*transformer.TransformerDef, textBlockReplacers map[int][]*transformer.ContentReplacer) []sseEvent {
 	switch eventType {
 	case "content_block_start":
-		return h.handleBlockStart(data, toolBlocks, nextOutputIndex, accumulator, writeEvents, tags, reqCtx)
+		return h.handleBlockStart(data, toolBlocks, nextOutputIndex, accumulator, writeEvents, tags, reqCtx, contentReplacerDefs, textBlockReplacers)
 	case "content_block_delta":
-		return h.handleBlockDelta(data, toolBlocks, accumulator, tags)
+		return h.handleBlockDelta(data, toolBlocks, accumulator, tags, textBlockReplacers)
 	case "content_block_stop":
-		return h.handleBlockStop(data, toolBlocks, accumulator, nextOutputIndex, tags, reqCtx)
+		return h.handleBlockStop(data, toolBlocks, accumulator, nextOutputIndex, tags, reqCtx, textBlockReplacers)
 	case "message_delta":
 		// Cache message_delta, send it before message_stop
 		*pendingMessageDelta = &sseEvent{eventType: eventType, data: data}
@@ -1436,7 +1443,7 @@ func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*to
 	}
 }
 
-func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext) []sseEvent {
+func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext, contentReplacerDefs []*transformer.TransformerDef, textBlockReplacers map[int][]*transformer.ContentReplacer) []sseEvent {
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return []sseEvent{{eventType: "content_block_start", data: data}}
@@ -1460,6 +1467,14 @@ func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockSta
 			flushEvents := h.flushAccumulator(*accumulator, nextOutputIndex, tags, reqCtx)
 			writeEvents(flushEvents)
 			*accumulator = nil
+		}
+		// Register content replacers for text blocks (fresh instances per block)
+		if blockType == "text" && len(contentReplacerDefs) > 0 {
+			var replacers []*transformer.ContentReplacer
+			for _, def := range contentReplacerDefs {
+				replacers = append(replacers, transformer.NewContentReplacer(def, h.logger))
+			}
+			textBlockReplacers[index] = replacers
 		}
 		// Increment output index for passthrough block
 		*nextOutputIndex++
@@ -1539,7 +1554,7 @@ func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockSta
 	return []sseEvent{{eventType: "content_block_start", data: data}}
 }
 
-func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockState, accumulator **toolBlockAccumulator, tags []string) []sseEvent {
+func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockState, accumulator **toolBlockAccumulator, tags []string, textBlockReplacers map[int][]*transformer.ContentReplacer) []sseEvent {
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return []sseEvent{{eventType: "content_block_delta", data: data}}
@@ -1550,6 +1565,25 @@ func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockSta
 		return []sseEvent{{eventType: "content_block_delta", data: data}}
 	}
 	index := int(indexFloat)
+
+	// Apply content replacers for text_delta
+	if replacers, exists := textBlockReplacers[index]; exists && len(replacers) > 0 {
+		delta, ok := payload["delta"].(map[string]interface{})
+		if ok {
+			if text, ok := delta["text"].(string); ok {
+				for _, cr := range replacers {
+					text = cr.Process(text)
+				}
+				if text == "" {
+					return nil // suppress empty delta
+				}
+				delta["text"] = text
+				payload["delta"] = delta
+				transformedData, _ := json.Marshal(payload)
+				return []sseEvent{{eventType: "content_block_delta", data: string(transformedData)}}
+			}
+		}
+	}
 
 	block, exists := toolBlocks[index]
 	if !exists || (!block.needsTransform && !block.pendingTransform) {
@@ -1589,7 +1623,7 @@ func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockSta
 	return []sseEvent{{eventType: "content_block_delta", data: data}}
 }
 
-func (h *Handler) handleBlockStop(data string, toolBlocks map[int]*toolBlockState, accumulator **toolBlockAccumulator, nextOutputIndex *int, tags []string, reqCtx *requestContext) []sseEvent {
+func (h *Handler) handleBlockStop(data string, toolBlocks map[int]*toolBlockState, accumulator **toolBlockAccumulator, nextOutputIndex *int, tags []string, reqCtx *requestContext, textBlockReplacers map[int][]*transformer.ContentReplacer) []sseEvent {
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return []sseEvent{{eventType: "content_block_stop", data: data}}
@@ -1600,6 +1634,9 @@ func (h *Handler) handleBlockStop(data string, toolBlocks map[int]*toolBlockStat
 		return []sseEvent{{eventType: "content_block_stop", data: data}}
 	}
 	index := int(indexFloat)
+
+	// Clean up text block replacers
+	delete(textBlockReplacers, index)
 
 	block, exists := toolBlocks[index]
 	if !exists {

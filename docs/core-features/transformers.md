@@ -36,6 +36,43 @@ transformers:
 
 流式响应需要累积工具调用的所有 delta 后再转换。详见 [streaming.md](./streaming.md)。
 
+## content_replace 类型：响应文本替换
+
+用于对上游响应中的文本内容进行匹配替换，常用于移除渠道注入的广告或水印文本。
+
+### 配置字段
+
+| 字段 | 说明 |
+|------|------|
+| `match` | 匹配标记文本，如 `【广告】` |
+| `replace_with` | 替换为的内容（空字符串=删除） |
+| `trim_after` | 匹配标记后，向后扩展到该分隔符并一并删除（如 `\n\n`） |
+
+### 配置示例
+
+```yaml
+transformers:
+  definitions:
+    - name: "remove_channel_ad"
+      type: "content_replace"
+      direction: "response"
+      content_patterns:
+        - match: "【广告】"
+          trim_after: "\n\n"
+          replace_with: ""
+  mappings:
+    - name: "channel_ad_removal"
+      enabled: true
+      tags: ["$g_my_gateway"]
+      transformer: "remove_channel_ad"
+```
+
+### 工作原理
+
+- 在流式 SSE 响应中，对每个 text content block 的第一个 `text_delta` 进行检测
+- 找到 `match` 标记后，从标记位置开始，向后查找 `trim_after` 分隔符，将整段（含尾部空行）替换为 `replace_with`
+- 后续 delta 直接透传，不再检测
+
 ## 详细设计文档
 
 - [模板化转换器设计](../模板化转换器设计.md) - 转换器模板化设计方案
