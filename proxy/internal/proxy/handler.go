@@ -1497,8 +1497,8 @@ func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockSta
 		return nil
 	}
 
-	if pendingTransform && !needsTransform {
-		// Has ParamConditions but no unconditional match yet
+	if pendingTransform {
+		// Has ParamConditions that need deferred evaluation with complete input
 		// Suppress output, collect input, evaluate in handleBlockStop
 		return nil
 	}
@@ -1570,7 +1570,7 @@ func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockSta
 			return nil
 		}
 
-		if block.pendingTransform && !block.needsTransform {
+		if block.pendingTransform {
 			// Pending transform: collect input, suppress delta, evaluate in handleBlockStop
 			return nil
 		}
@@ -1607,7 +1607,7 @@ func (h *Handler) handleBlockStop(data string, toolBlocks map[int]*toolBlockStat
 	}
 
 	// For pending transform tools, evaluate with complete input
-	if block.pendingTransform && !block.needsTransform && len(block.inputParts) > 0 {
+	if block.pendingTransform && len(block.inputParts) > 0 {
 		fullJSON := strings.Join(block.inputParts, "")
 		var input map[string]interface{}
 		if err := json.Unmarshal([]byte(fullJSON), &input); err == nil {

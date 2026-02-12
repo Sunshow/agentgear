@@ -158,8 +158,14 @@ func (r *Registry) GetRequestTransformer(toolName string, tags []string) *Transf
 	return nil
 }
 
-// findTransformerWithInput finds a matching transformer definition and mapping with input condition check
+// findTransformerWithInput finds a matching transformer definition and mapping with input condition check.
+// When input is available, conditional transformers (with ParamConditions) are checked first;
+// unconditional transformers serve as fallback when no conditional match is found.
+// When input is nil, the first matching transformer is returned (optimistic match for deferred evaluation).
 func (r *Registry) findTransformerWithInput(toolName, direction string, tags []string, input map[string]interface{}) (*TransformerDef, *MappingRule) {
+	var fallbackDef *TransformerDef
+	var fallbackMapping *MappingRule
+
 	for i := range r.mappings {
 		m := &r.mappings[i]
 		if !m.Enabled {
@@ -172,14 +178,34 @@ func (r *Registry) findTransformerWithInput(toolName, direction string, tags []s
 		for j := range r.definitions {
 			d := &r.definitions[j]
 			if d.Name == m.Transformer && d.Direction == direction && d.SourceTool == toolName {
-				// Check param conditions
-				if r.matchParamConditions(d.ParamConditions, input) {
-					return d, m
+				if len(d.ParamConditions) > 0 {
+					// Conditional transformer: check param conditions
+					if r.matchParamConditions(d.ParamConditions, input) {
+						if input == nil {
+							// input not yet available, optimistic match for deferred evaluation
+							return d, m
+						}
+						// input available and conditions matched
+						return d, m
+					}
+					// Conditions not matched, skip this one
+				} else {
+					// Unconditional transformer: save as fallback
+					if fallbackDef == nil {
+						fallbackDef = d
+						fallbackMapping = m
+					}
+					if input == nil {
+						// input not yet available, return first match (unconditional)
+						return d, m
+					}
 				}
 			}
 		}
 	}
-	return nil, nil
+
+	// No conditional match found, return unconditional fallback
+	return fallbackDef, fallbackMapping
 }
 
 // matchParamConditions checks if input matches all param conditions
