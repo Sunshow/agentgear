@@ -20,72 +20,70 @@ func TestAdRemover_Process(t *testing.T) {
 		{
 			name: "prefix ad separated by dash",
 			config: &AdRemoveConfig{
-				Keywords:       []string{"137810429"},
+				Keywords:       []string{"900100200"},
 				PrefixBoundary: sep,
 			},
-			input: "Official group: 137810429 - promo ongoing - Hi! How can I help?",
+			input: "Official group: 900100200 - promo ongoing - Hi! How can I help?",
 			want:  "Hi! How can I help?",
 		},
 		{
 			name: "prefix ad with multiple separators inside ad",
 			config: &AdRemoveConfig{
-				Keywords:       []string{"137810429", "官方群"},
+				Keywords:       []string{"900100200", "ADGROUP"},
 				PrefixBoundary: sep,
 			},
-			// Real case: 官方Q群：1‍37810429 - 马年特惠活动持续中 - Hi
-			input: "官方Q群：137810429 - 马年特惠活动持续中 - Hi! How can I help?",
+			input: "ADGROUP：900100200 - seasonal promo ongoing - Hi! How can I help?",
 			want:  "Hi! How can I help?",
 		},
 		{
 			name: "prefix ad with zero-width chars and no separator",
 			config: &AdRemoveConfig{
-				Keywords:       []string{"137810429", "timicc"},
+				Keywords:       []string{"900100200", "advendor"},
 				PrefixBoundary: sep,
 			},
-			// Real case: URL glued to Hi
-			input: "\u200dPromo, group: 1\u200d37810429, https://timicc.comHi! How can I help?",
+			input: "\u200dPromo, group: 9\u200d00100200, https://advendor.comHi! How can I help?",
 			want:  "",
 		},
 		{
 			name: "prefix ad with pipe separator",
 			config: &AdRemoveConfig{
-				Keywords:       []string{"timicc"},
+				Keywords:       []string{"advendor"},
 				PrefixBoundary: sep,
 			},
-			input: "马年限时特惠进行中｜https://timicc.com｜Hi! How can I help?",
+			input: "Seasonal promo ongoing｜https://advendor.com｜Hi! How can I help?",
 			want:  "Hi! How can I help?",
 		},
 		{
 			name: "suffix ad with newline separator",
 			config: &AdRemoveConfig{
-				Keywords:       []string{"timicc", "137810429"},
+				Keywords:       []string{"advendor", "900100200"},
 				SuffixBoundary: sep,
 			},
-			input: "Hi! How can I help?\n\nADTEST | https://timicc.com, group: 137810429",
+			input: "Hi! How can I help?\n\nADTEST | https://advendor.com, group: 900100200",
 			want:  "Hi! How can I help?",
 		},
 		{
 			name: "suffix ad with zero-width chars",
 			config: &AdRemoveConfig{
-				Keywords:       []string{"timicc"},
+				Keywords:       []string{"advendor"},
 				SuffixBoundary: sep,
 			},
-			input: "Hi! How can I help?\n\nA\u200dDTEST | https://timicc.com",
+			input: "Hi! How can I help?\n\nA\u200dDTEST | https://advendor.com",
 			want:  "Hi! How can I help?",
 		},
 		{
 			name: "suffix ad with dash separator",
 			config: &AdRemoveConfig{
-				Keywords:       []string{"timicc"},
+				Keywords:       []string{"advendor"},
 				SuffixBoundary: sep,
 			},
-			input: "Hello world - timicc.com promo",
+			input: "Hello world - advendor.com promo",
 			want:  "Hello world",
 		},
 		{
 			name: "no keyword match passes through",
 			config: &AdRemoveConfig{
-				Keywords:       []string{"adtest", "137810429"},
+				Keywords:       []string{"adtest", "900100200"},
 				PrefixBoundary: sep,
 			},
 			input: "Hello! How can I help you today?",
@@ -123,23 +121,21 @@ func TestAdRemover_Process(t *testing.T) {
 		{
 			name: "both boundaries configured suffix wins",
 			config: &AdRemoveConfig{
-				Keywords:       []string{"timicc", "137810429"},
+				Keywords:       []string{"advendor", "900100200"},
 				PrefixBoundary: sep,
 				SuffixBoundary: sep,
 			},
-			// Real case: suffix ad
-			input: "Hi! How can I help today?\n\nTIMICC | https://timicc.com，QQ官方群：137810429",
+			input: "Hi! How can I help today?\n\nADVENDOR | https://advendor.com, group: 900100200",
 			want:  "Hi! How can I help today?",
 		},
 		{
 			name: "both boundaries configured prefix wins",
 			config: &AdRemoveConfig{
-				Keywords:       []string{"timicc", "137810429"},
+				Keywords:       []string{"advendor", "900100200"},
 				PrefixBoundary: sep,
 				SuffixBoundary: sep,
 			},
-			// Real case: prefix ad with separator
-			input: "官方Q群：137810429 - 马年特惠活动持续中 - Hi! How can I help?",
+			input: "ADGROUP：900100200 - seasonal promo ongoing - Hi! How can I help?",
 			want:  "Hi! How can I help?",
 		},
 	}
@@ -167,13 +163,12 @@ func TestAdRemover_ProcessMultiDelta(t *testing.T) {
 		def := &TransformerDef{
 			Name: "test_ad_remove",
 			AdRemove: &AdRemoveConfig{
-				Keywords:       []string{"timicc", "137810429"},
+				Keywords:       []string{"advendor", "900100200"},
 				SuffixBoundary: sep,
 			},
 		}
 		ar := NewAdRemover(def, logger)
 
-		// Normal deltas pass through
 		got := ar.Process("Hi")
 		if got != "Hi" {
 			t.Errorf("delta 1: got %q, want %q", got, "Hi")
@@ -182,8 +177,7 @@ func TestAdRemover_ProcessMultiDelta(t *testing.T) {
 		if got != "! How can I help you today?" {
 			t.Errorf("delta 2: got %q, want %q", got, "! How can I help you today?")
 		}
-		// Last delta has ad
-		got = ar.Process("\n\nQQ交流群：137810429 | timicc.com | 马年特惠活动")
+		got = ar.Process("\n\nADGROUP：900100200 | advendor.com | seasonal promo")
 		if got != "" {
 			t.Errorf("delta 3 (ad): got %q, want empty", got)
 		}
@@ -193,22 +187,19 @@ func TestAdRemover_ProcessMultiDelta(t *testing.T) {
 		def := &TransformerDef{
 			Name: "test_ad_remove",
 			AdRemove: &AdRemoveConfig{
-				Keywords:       []string{"137810429"},
+				Keywords:       []string{"900100200"},
 				PrefixBoundary: sep,
 				SuffixBoundary: sep,
 			},
 		}
 		ar := NewAdRemover(def, logger)
 
-		// Real case: ad block with no real content after last separator
-		got := ar.Process("马年特惠活动火热进行中，")
-		// No keyword match (137810429 not present), passes through
-		if got != "马年特惠活动火热进行中，" {
+		got := ar.Process("Seasonal promo ongoing,")
+		if got != "Seasonal promo ongoing," {
 			t.Errorf("no keyword delta: got %q, want passthrough", got)
 		}
 
-		// With keyword but no separator: full removal
-		got = ar.Process("官方Q群：137810429，马年限时特惠进行中")
+		got = ar.Process("ADGROUP：900100200, seasonal promo ongoing")
 		if got != "" {
 			t.Errorf("ad-only delta no sep: got %q, want empty", got)
 		}
@@ -218,13 +209,13 @@ func TestAdRemover_ProcessMultiDelta(t *testing.T) {
 		def := &TransformerDef{
 			Name: "test_ad_remove",
 			AdRemove: &AdRemoveConfig{
-				Keywords:       []string{"137810429"},
+				Keywords:       []string{"900100200"},
 				PrefixBoundary: sep,
 			},
 		}
 		ar := NewAdRemover(def, logger)
 
-		got := ar.Process("官方Q群：137810429 - 马年限时特惠进行中 - Hi! How can I help?")
+		got := ar.Process("ADGROUP：900100200 - seasonal promo ongoing - Hi! How can I help?")
 		if got != "Hi! How can I help?" {
 			t.Errorf("delta 1 (ad): got %q, want %q", got, "Hi! How can I help?")
 		}
@@ -245,22 +236,18 @@ func TestAdRemover_ProcessMultiDelta(t *testing.T) {
 		}
 		ar := NewAdRemover(def, logger)
 
-		// First delta: no keyword
 		got := ar.Process("Hello world")
 		if got != "Hello world" {
 			t.Errorf("delta 1: got %q, want passthrough", got)
 		}
-		// Second delta: has keyword, should be removed
 		got = ar.Process("adtest promo content")
 		if got != "" {
 			t.Errorf("delta 2: got %q, want empty", got)
 		}
-		// Third delta: has keyword again, should also be removed
 		got = ar.Process("another adtest ad")
 		if got != "" {
 			t.Errorf("delta 3: got %q, want empty", got)
 		}
-		// Fourth delta: clean
 		got = ar.Process("clean content")
 		if got != "clean content" {
 			t.Errorf("delta 4: got %q, want passthrough", got)
