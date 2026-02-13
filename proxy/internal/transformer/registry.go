@@ -774,6 +774,33 @@ func (r *Registry) GetContentReplacerDefs(tags []string) []*TransformerDef {
 	return result
 }
 
+// GetAdRemoverDefs returns all ad_remove type transformer definitions that match the given tags
+func (r *Registry) GetAdRemoverDefs(tags []string) []*TransformerDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*TransformerDef
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
+			continue
+		}
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Type == "ad_remove" && d.Direction == "response" && d.AdRemove != nil {
+				result = append(result, d)
+				break
+			}
+		}
+	}
+
+	return result
+}
+
 // GetCompressTransformer returns the first compress type transformer that matches the given tags
 func (r *Registry) GetCompressTransformer(tags []string) *TransformerDef {
 	r.mu.RLock()

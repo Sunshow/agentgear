@@ -113,6 +113,7 @@ type requestContext struct {
 	connInfo            *memory.ConnectionInfo
 	forceLog            bool     // 强制记录日志（不受 logging.enabled 影响）
 	appliedTransformers []string // 收集应用的 transformers（包括响应方向）
+	isFirstTurn         bool     // true when request has only one user message
 }
 
 func (h *Handler) getOrCreateSession(c *gin.Context) (string, int) {
@@ -246,6 +247,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 		transformedReqBody: transformedReqBody,
 		tags:               tags,
 		connInfo:           connInfo,
+		isFirstTurn:        countUserMessages(reqBody) == 1,
 	}
 
 	// 请求前预检测：基于 token 估算检查是否超过上下文限制
@@ -819,6 +821,29 @@ func (h *Handler) getGatewayMap() map[string]string {
 	return make(map[string]string)
 }
 
+// countUserMessages counts the number of user role messages in a request body.
+func countUserMessages(body []byte) int {
+	var req map[string]interface{}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return 0
+	}
+	messages, ok := req["messages"].([]interface{})
+	if !ok {
+		return 0
+	}
+	count := 0
+	for _, msg := range messages {
+		msgMap, ok := msg.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if role, _ := msgMap["role"].(string); role == "user" {
+			count++
+		}
+	}
+	return count
+}
+
 // injectMessage injects text into the first user message's content
 func (h *Handler) injectMessage(req map[string]interface{}, text string, format string) bool {
 	if text == "" {
@@ -1304,6 +1329,13 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 	}
 	textBlockReplacers := make(map[int][]*transformer.ContentReplacer)
 
+	// Initialize ad remover definitions (only active on first turn)
+	var adRemoverDefs []*transformer.TransformerDef
+	if reqCtx.isFirstTurn && h.transformerRegistry != nil {
+		adRemoverDefs = h.transformerRegistry.GetAdRemoverDefs(reqCtx.tags)
+	}
+	textBlockAdRemovers := make(map[int][]*transformer.AdRemover)
+
 	writeEvents := func(events []sseEvent) {
 		for _, evt := range events {
 			outLine := fmt.Sprintf("event: %s\ndata: %s\n\n", evt.eventType, evt.data)
@@ -1318,7 +1350,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		if firstEvent.eventType == "content_block_start" {
 			hasContentBlock = true
 		}
-		outputEvents := h.processSSEEvent(firstEvent.eventType, firstEvent.data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers)
+		outputEvents := h.processSSEEvent(firstEvent.eventType, firstEvent.data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers)
 		writeEvents(outputEvents)
 	}
 
@@ -1354,7 +1386,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 					hasContentBlock = true
 				}
 
-				outputEvents := h.processSSEEvent(eventType, data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers)
+				outputEvents := h.processSSEEvent(eventType, data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers)
 				writeEvents(outputEvents)
 			}
 			_, _ = reader.ReadString('\n')
@@ -1411,14 +1443,14 @@ type sseEvent struct {
 	data      string
 }
 
-func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, pendingMessageDelta **sseEvent, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext, contentReplacerDefs []*transformer.TransformerDef, textBlockReplacers map[int][]*transformer.ContentReplacer) []sseEvent {
+func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, pendingMessageDelta **sseEvent, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext, contentReplacerDefs []*transformer.TransformerDef, textBlockReplacers map[int][]*transformer.ContentReplacer, adRemoverDefs []*transformer.TransformerDef, textBlockAdRemovers map[int][]*transformer.AdRemover) []sseEvent {
 	switch eventType {
 	case "content_block_start":
-		return h.handleBlockStart(data, toolBlocks, nextOutputIndex, accumulator, writeEvents, tags, reqCtx, contentReplacerDefs, textBlockReplacers)
+		return h.handleBlockStart(data, toolBlocks, nextOutputIndex, accumulator, writeEvents, tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers)
 	case "content_block_delta":
-		return h.handleBlockDelta(data, toolBlocks, accumulator, tags, textBlockReplacers)
+		return h.handleBlockDelta(data, toolBlocks, accumulator, tags, textBlockReplacers, textBlockAdRemovers)
 	case "content_block_stop":
-		return h.handleBlockStop(data, toolBlocks, accumulator, nextOutputIndex, tags, reqCtx, textBlockReplacers)
+		return h.handleBlockStop(data, toolBlocks, accumulator, nextOutputIndex, tags, reqCtx, textBlockReplacers, textBlockAdRemovers)
 	case "message_delta":
 		// Cache message_delta, send it before message_stop
 		*pendingMessageDelta = &sseEvent{eventType: eventType, data: data}
@@ -1443,7 +1475,7 @@ func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*to
 	}
 }
 
-func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext, contentReplacerDefs []*transformer.TransformerDef, textBlockReplacers map[int][]*transformer.ContentReplacer) []sseEvent {
+func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext, contentReplacerDefs []*transformer.TransformerDef, textBlockReplacers map[int][]*transformer.ContentReplacer, adRemoverDefs []*transformer.TransformerDef, textBlockAdRemovers map[int][]*transformer.AdRemover) []sseEvent {
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return []sseEvent{{eventType: "content_block_start", data: data}}
@@ -1475,6 +1507,13 @@ func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockSta
 				replacers = append(replacers, transformer.NewContentReplacer(def, h.logger))
 			}
 			textBlockReplacers[index] = replacers
+		}
+		if blockType == "text" && len(adRemoverDefs) > 0 {
+			var removers []*transformer.AdRemover
+			for _, def := range adRemoverDefs {
+				removers = append(removers, transformer.NewAdRemover(def, h.logger))
+			}
+			textBlockAdRemovers[index] = removers
 		}
 		// Increment output index for passthrough block
 		*nextOutputIndex++
@@ -1554,7 +1593,7 @@ func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockSta
 	return []sseEvent{{eventType: "content_block_start", data: data}}
 }
 
-func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockState, accumulator **toolBlockAccumulator, tags []string, textBlockReplacers map[int][]*transformer.ContentReplacer) []sseEvent {
+func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockState, accumulator **toolBlockAccumulator, tags []string, textBlockReplacers map[int][]*transformer.ContentReplacer, textBlockAdRemovers map[int][]*transformer.AdRemover) []sseEvent {
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return []sseEvent{{eventType: "content_block_delta", data: data}}
@@ -1566,13 +1605,18 @@ func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockSta
 	}
 	index := int(indexFloat)
 
-	// Apply content replacers for text_delta
-	if replacers, exists := textBlockReplacers[index]; exists && len(replacers) > 0 {
+	// Apply content replacers and ad removers for text_delta
+	replacers := textBlockReplacers[index]
+	adRemovers := textBlockAdRemovers[index]
+	if len(replacers) > 0 || len(adRemovers) > 0 {
 		delta, ok := payload["delta"].(map[string]interface{})
 		if ok {
 			if text, ok := delta["text"].(string); ok {
 				for _, cr := range replacers {
 					text = cr.Process(text)
+				}
+				for _, ar := range adRemovers {
+					text = ar.Process(text)
 				}
 				if text == "" {
 					return nil // suppress empty delta
@@ -1623,7 +1667,7 @@ func (h *Handler) handleBlockDelta(data string, toolBlocks map[int]*toolBlockSta
 	return []sseEvent{{eventType: "content_block_delta", data: data}}
 }
 
-func (h *Handler) handleBlockStop(data string, toolBlocks map[int]*toolBlockState, accumulator **toolBlockAccumulator, nextOutputIndex *int, tags []string, reqCtx *requestContext, textBlockReplacers map[int][]*transformer.ContentReplacer) []sseEvent {
+func (h *Handler) handleBlockStop(data string, toolBlocks map[int]*toolBlockState, accumulator **toolBlockAccumulator, nextOutputIndex *int, tags []string, reqCtx *requestContext, textBlockReplacers map[int][]*transformer.ContentReplacer, textBlockAdRemovers map[int][]*transformer.AdRemover) []sseEvent {
 	var payload map[string]interface{}
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return []sseEvent{{eventType: "content_block_stop", data: data}}
@@ -1635,8 +1679,9 @@ func (h *Handler) handleBlockStop(data string, toolBlocks map[int]*toolBlockStat
 	}
 	index := int(indexFloat)
 
-	// Clean up text block replacers
+	// Clean up text block replacers and ad removers
 	delete(textBlockReplacers, index)
+	delete(textBlockAdRemovers, index)
 
 	block, exists := toolBlocks[index]
 	if !exists {

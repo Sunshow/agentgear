@@ -14,6 +14,14 @@ type ContentReplacePattern struct {
 	StripZeroWidth bool   `mapstructure:"strip_zero_width" json:"strip_zero_width,omitempty" yaml:"strip_zero_width,omitempty"` // Strip zero-width Unicode chars before matching
 }
 
+// AdRemoveConfig defines configuration for ad removal in streaming responses
+type AdRemoveConfig struct {
+	Keywords       []string `mapstructure:"keywords" json:"keywords" yaml:"keywords"`                                           // Keywords to match (after stripping zero-width chars), any hit triggers removal
+	PrefixBoundary string   `mapstructure:"prefix_boundary" json:"prefix_boundary,omitempty" yaml:"prefix_boundary,omitempty"`   // Regex for prefix-ad end boundary, e.g. "(Hi|Hello)"
+	SuffixBoundary string   `mapstructure:"suffix_boundary" json:"suffix_boundary,omitempty" yaml:"suffix_boundary,omitempty"`   // Regex for suffix-ad start boundary, e.g. "\\n\\n"
+	ReplaceWith    string   `mapstructure:"replace_with" json:"replace_with,omitempty" yaml:"replace_with,omitempty"`             // Replacement text (default empty = delete)
+}
+
 // ParamCondition defines a condition for matching tool parameters
 type ParamCondition struct {
 	Param string `mapstructure:"param" json:"param" yaml:"param"` // 参数路径，如 "file_path"
@@ -57,6 +65,7 @@ type TransformerDef struct {
 	TokenEstimateRatio    float64             `mapstructure:"token_estimate_ratio" json:"token_estimate_ratio,omitempty" yaml:"token_estimate_ratio,omitempty"`
 	ImageTokenEstimate    int                 `mapstructure:"image_token_estimate" json:"image_token_estimate,omitempty" yaml:"image_token_estimate,omitempty"` // 单张图片估算 token 数，默认 1600
 	ContentPatterns       []ContentReplacePattern `mapstructure:"content_patterns" json:"content_patterns,omitempty" yaml:"content_patterns,omitempty"`
+	AdRemove              *AdRemoveConfig         `mapstructure:"ad_remove" json:"ad_remove,omitempty" yaml:"ad_remove,omitempty"`
 	ParamConditions       []ParamCondition    `mapstructure:"param_conditions" json:"param_conditions,omitempty" yaml:"param_conditions,omitempty"`
 	HeaderInjections      []HeaderInjection   `mapstructure:"header_injections" json:"header_injections,omitempty" yaml:"header_injections,omitempty"`
 	// compress 类型专用字段
