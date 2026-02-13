@@ -159,26 +159,113 @@ func TestAdRemover_Process(t *testing.T) {
 	}
 }
 
-func TestAdRemover_ProcessOnlyOnce(t *testing.T) {
+func TestAdRemover_ProcessMultiDelta(t *testing.T) {
 	logger := zap.NewNop()
-	def := &TransformerDef{
-		Name: "test_ad_remove",
-		AdRemove: &AdRemoveConfig{
-			Keywords:       []string{"adtest"},
-			PrefixBoundary: `(?:\s-\s)`,
-		},
-	}
-	ar := NewAdRemover(def, logger)
+	sep := `(?:\n\n|\s-\s|[|｜])`
 
-	got := ar.Process("adtest promo - Hi there")
-	if got != "Hi there" {
-		t.Errorf("first Process() = %q, want %q", got, "Hi there")
-	}
+	t.Run("ad in last delta", func(t *testing.T) {
+		def := &TransformerDef{
+			Name: "test_ad_remove",
+			AdRemove: &AdRemoveConfig{
+				Keywords:       []string{"timicc", "137810429"},
+				SuffixBoundary: sep,
+			},
+		}
+		ar := NewAdRemover(def, logger)
 
-	got = ar.Process("adtest another delta")
-	if got != "adtest another delta" {
-		t.Errorf("second Process() = %q, want passthrough", got)
-	}
+		// Normal deltas pass through
+		got := ar.Process("Hi")
+		if got != "Hi" {
+			t.Errorf("delta 1: got %q, want %q", got, "Hi")
+		}
+		got = ar.Process("! How can I help you today?")
+		if got != "! How can I help you today?" {
+			t.Errorf("delta 2: got %q, want %q", got, "! How can I help you today?")
+		}
+		// Last delta has ad
+		got = ar.Process("\n\nQQ交流群：137810429 | timicc.com | 马年特惠活动")
+		if got != "" {
+			t.Errorf("delta 3 (ad): got %q, want empty", got)
+		}
+	})
+
+	t.Run("ad-only delta (whole block is ad)", func(t *testing.T) {
+		def := &TransformerDef{
+			Name: "test_ad_remove",
+			AdRemove: &AdRemoveConfig{
+				Keywords:       []string{"137810429"},
+				PrefixBoundary: sep,
+				SuffixBoundary: sep,
+			},
+		}
+		ar := NewAdRemover(def, logger)
+
+		// Real case: ad block with no real content after last separator
+		got := ar.Process("马年特惠活动火热进行中，")
+		// No keyword match (137810429 not present), passes through
+		if got != "马年特惠活动火热进行中，" {
+			t.Errorf("no keyword delta: got %q, want passthrough", got)
+		}
+
+		// With keyword but no separator: full removal
+		got = ar.Process("官方Q群：137810429，马年限时特惠进行中")
+		if got != "" {
+			t.Errorf("ad-only delta no sep: got %q, want empty", got)
+		}
+	})
+
+	t.Run("ad in first delta normal in later", func(t *testing.T) {
+		def := &TransformerDef{
+			Name: "test_ad_remove",
+			AdRemove: &AdRemoveConfig{
+				Keywords:       []string{"137810429"},
+				PrefixBoundary: sep,
+			},
+		}
+		ar := NewAdRemover(def, logger)
+
+		got := ar.Process("官方Q群：137810429 - 马年限时特惠进行中 - Hi! How can I help?")
+		if got != "Hi! How can I help?" {
+			t.Errorf("delta 1 (ad): got %q, want %q", got, "Hi! How can I help?")
+		}
+		got = ar.Process(" More content here")
+		if got != " More content here" {
+			t.Errorf("delta 2: got %q, want passthrough", got)
+		}
+	})
+
+	t.Run("each delta checked independently", func(t *testing.T) {
+		def := &TransformerDef{
+			Name: "test_ad_remove",
+			AdRemove: &AdRemoveConfig{
+				Keywords:       []string{"adtest"},
+				PrefixBoundary: sep,
+				SuffixBoundary: sep,
+			},
+		}
+		ar := NewAdRemover(def, logger)
+
+		// First delta: no keyword
+		got := ar.Process("Hello world")
+		if got != "Hello world" {
+			t.Errorf("delta 1: got %q, want passthrough", got)
+		}
+		// Second delta: has keyword, should be removed
+		got = ar.Process("adtest promo content")
+		if got != "" {
+			t.Errorf("delta 2: got %q, want empty", got)
+		}
+		// Third delta: has keyword again, should also be removed
+		got = ar.Process("another adtest ad")
+		if got != "" {
+			t.Errorf("delta 3: got %q, want empty", got)
+		}
+		// Fourth delta: clean
+		got = ar.Process("clean content")
+		if got != "clean content" {
+			t.Errorf("delta 4: got %q, want passthrough", got)
+		}
+	})
 }
 
 func TestAdRemover_Reset(t *testing.T) {

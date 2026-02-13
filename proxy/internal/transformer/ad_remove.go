@@ -8,15 +8,14 @@ import (
 )
 
 // AdRemover detects and removes injected ad content from streaming text deltas.
-// It works per-delta (ads appear in a single delta) and only processes the first
-// delta that matches any configured keyword.
+// It checks every delta for keyword matches (after stripping zero-width chars)
+// and removes the ad portion using configured boundary separators.
 type AdRemover struct {
 	config         *AdRemoveConfig
 	logger         *zap.Logger
 	name           string
 	prefixBoundary *regexp.Regexp
 	suffixBoundary *regexp.Regexp
-	done           bool
 }
 
 func NewAdRemover(def *TransformerDef, logger *zap.Logger) *AdRemover {
@@ -37,10 +36,6 @@ func NewAdRemover(def *TransformerDef, logger *zap.Logger) *AdRemover {
 // Process checks a text delta for ad content and removes it if found.
 // Returns the cleaned text. Empty string means suppress the delta.
 func (ar *AdRemover) Process(text string) string {
-	if ar.done {
-		return text
-	}
-
 	cleaned, mapping := stripZeroWidthChars(text)
 	cleanedLower := strings.ToLower(cleaned)
 
@@ -69,7 +64,6 @@ func (ar *AdRemover) Process(text string) string {
 		return text
 	}
 
-	ar.done = true
 	ar.logger.Info("ad_remove detected ad",
 		zap.String("transformer", ar.name),
 		zap.String("keyword", matchedKeyword))
@@ -108,7 +102,6 @@ func (ar *AdRemover) Process(text string) string {
 	return ar.config.ReplaceWith
 }
 
-// Reset resets state for a new text content block.
+// Reset resets state for a new text content block (no-op, kept for interface compatibility).
 func (ar *AdRemover) Reset() {
-	ar.done = false
 }
