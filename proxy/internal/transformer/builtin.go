@@ -237,7 +237,7 @@ Read the complete conversation and generate a structured summary according to th
 	// === 消息格式修正转换器 ===
 	{
 		Name:        "$generic_message_sanitize",
-		Description: "修正消息格式：移除开头assistant、合并连续同角色消息",
+		Description: "修正消息格式：开头assistant前补充占位user消息",
 		Type:        "message_sanitize",
 		Direction:   "request",
 		Builtin:     true,

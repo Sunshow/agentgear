@@ -48,72 +48,25 @@ func (s *MessageSanitizer) Sanitize(reqBody []byte) ([]byte, bool, error) {
 		return reqBody, false, nil
 	}
 
-	originalCount := len(messages)
+	modified := false
 
-	// 1. Remove leading assistant messages
-	for len(messages) > 0 && messages[0].Role == "assistant" {
-		s.logger.Info("removing leading assistant message")
-		messages = messages[1:]
+	// Prepend placeholder user message if conversation starts with assistant
+	if messages[0].Role == "assistant" {
+		placeholder := Message{Role: "user", Content: "."}
+		messages = append([]Message{placeholder}, messages...)
+		s.logger.Info("prepended placeholder user message for assistant-first conversation")
+		modified = true
 	}
 
-	// 2. Merge consecutive same-role messages
-	merged := []Message{}
-	for i := 0; i < len(messages); i++ {
-		current := messages[i]
-
-		// Collect consecutive same-role messages
-		for i+1 < len(messages) && messages[i+1].Role == current.Role {
-			next := messages[i+1]
-			current = s.mergeMessages(current, next)
-			i++
-		}
-
-		merged = append(merged, current)
+	if !modified {
+		return reqBody, false, nil
 	}
 
-	if len(merged) == originalCount {
-		return reqBody, false, nil // No changes
-	}
-
-	req["messages"] = merged
+	req["messages"] = messages
 	newBody, err := json.Marshal(req)
 	if err != nil {
 		return reqBody, false, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	s.logger.Info("message sanitization completed",
-		zap.Int("original_count", originalCount),
-		zap.Int("sanitized_count", len(merged)))
-
 	return newBody, true, nil
-}
-
-// mergeMessages merges two messages with the same role
-func (s *MessageSanitizer) mergeMessages(m1, m2 Message) Message {
-	// Handle content arrays
-	if arr1, ok := m1.Content.([]interface{}); ok {
-		if arr2, ok := m2.Content.([]interface{}); ok {
-			return Message{
-				Role:    m1.Role,
-				Content: append(arr1, arr2...),
-			}
-		}
-	}
-
-	// Handle string content
-	str1 := s.contentToString(m1.Content)
-	str2 := s.contentToString(m2.Content)
-
-	return Message{
-		Role:    m1.Role,
-		Content: str1 + "\n" + str2,
-	}
-}
-
-func (s *MessageSanitizer) contentToString(content interface{}) string {
-	if str, ok := content.(string); ok {
-		return str
-	}
-	data, _ := json.Marshal(content)
-	return string(data)
 }
