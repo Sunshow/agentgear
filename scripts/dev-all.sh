@@ -1,9 +1,10 @@
 #!/bin/bash
-SCRIPT_DIR="$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # 启动 Proxy (后台)
 echo "Starting Proxy..."
-cd "$SCRIPT_DIR/../proxy"
+cd "$PROJECT_ROOT/proxy"
 go run ./cmd/agentgear/ --config ./configs/config.yaml &
 PROXY_PID=$!
 echo "Proxy PID: $PROXY_PID"
@@ -13,7 +14,7 @@ sleep 2
 
 # 启动 GUI
 echo "Starting GUI..."
-cd "$SCRIPT_DIR/../gui"
+cd "$PROJECT_ROOT/gui"
 if [ ! -d "node_modules" ]; then
     echo "Installing dependencies..."
     npm install
