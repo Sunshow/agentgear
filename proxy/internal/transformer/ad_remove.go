@@ -44,18 +44,28 @@ func (ar *AdRemover) Process(text string) string {
 	cleaned, mapping := stripZeroWidthChars(text)
 	cleanedLower := strings.ToLower(cleaned)
 
+	// Find first keyword position and last keyword end position
+	firstKeywordPos := -1
+	lastKeywordEnd := -1
 	matchedKeyword := ""
-	keywordPos := -1
 	for _, kw := range ar.config.Keywords {
-		idx := strings.Index(cleanedLower, strings.ToLower(kw))
+		kwLower := strings.ToLower(kw)
+		idx := strings.Index(cleanedLower, kwLower)
 		if idx >= 0 {
-			matchedKeyword = kw
-			keywordPos = idx
-			break
+			if matchedKeyword == "" {
+				matchedKeyword = kw
+			}
+			if firstKeywordPos < 0 || idx < firstKeywordPos {
+				firstKeywordPos = idx
+			}
+			end := idx + len(kwLower)
+			if end > lastKeywordEnd {
+				lastKeywordEnd = end
+			}
 		}
 	}
 
-	if keywordPos < 0 {
+	if firstKeywordPos < 0 {
 		return text
 	}
 
@@ -64,19 +74,31 @@ func (ar *AdRemover) Process(text string) string {
 		zap.String("transformer", ar.name),
 		zap.String("keyword", matchedKeyword))
 
-	// Try suffix boundary first: if keyword appears after the boundary match, it's a suffix ad
+	// Try suffix ad: find the FIRST separator BEFORE the first keyword
+	// (earliest boundary between normal content and ad)
 	if ar.suffixBoundary != nil {
-		loc := ar.suffixBoundary.FindStringIndex(cleaned)
-		if loc != nil && keywordPos >= loc[0] {
-			return ar.removeSuffix(cleaned, mapping, text, loc)
+		allMatches := ar.suffixBoundary.FindAllStringIndex(cleaned, -1)
+		for i := 0; i < len(allMatches); i++ {
+			if allMatches[i][0] < firstKeywordPos {
+				origIdx := mapping[allMatches[i][0]]
+				ar.logger.Info("ad_remove suffix removed",
+					zap.String("transformer", ar.name))
+				return text[:origIdx] + ar.config.ReplaceWith
+			}
 		}
 	}
 
-	// Try prefix boundary: if keyword appears before the boundary match, it's a prefix ad
+	// Try prefix ad: find the LAST separator AFTER the last keyword
+	// (latest boundary between ad and normal content)
 	if ar.prefixBoundary != nil {
-		loc := ar.prefixBoundary.FindStringIndex(cleaned)
-		if loc != nil && keywordPos < loc[0] {
-			return ar.removePrefix(cleaned, mapping, text, loc)
+		allMatches := ar.prefixBoundary.FindAllStringIndex(cleaned, -1)
+		for i := len(allMatches) - 1; i >= 0; i-- {
+			if allMatches[i][0] >= lastKeywordEnd {
+				origIdx := mapping[allMatches[i][1]]
+				ar.logger.Info("ad_remove prefix removed",
+					zap.String("transformer", ar.name))
+				return ar.config.ReplaceWith + text[origIdx:]
+			}
 		}
 	}
 
@@ -84,24 +106,6 @@ func (ar *AdRemover) Process(text string) string {
 	ar.logger.Info("ad_remove full removal (no boundary matched)",
 		zap.String("transformer", ar.name))
 	return ar.config.ReplaceWith
-}
-
-// removePrefix removes ad content from the beginning of text up to the boundary.
-func (ar *AdRemover) removePrefix(cleaned string, mapping []int, original string, boundaryLoc []int) string {
-	origIdx := mapping[boundaryLoc[0]]
-	result := original[origIdx:]
-	ar.logger.Info("ad_remove prefix removed",
-		zap.String("transformer", ar.name))
-	return ar.config.ReplaceWith + result
-}
-
-// removeSuffix removes ad content from the boundary to the end of text.
-func (ar *AdRemover) removeSuffix(cleaned string, mapping []int, original string, boundaryLoc []int) string {
-	origIdx := mapping[boundaryLoc[0]]
-	result := original[:origIdx]
-	ar.logger.Info("ad_remove suffix removed",
-		zap.String("transformer", ar.name))
-	return result + ar.config.ReplaceWith
 }
 
 // Reset resets state for a new text content block.
