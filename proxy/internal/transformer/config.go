@@ -8,9 +8,10 @@ type ParamMapping struct {
 
 // ContentReplacePattern defines a text replacement rule for response content
 type ContentReplacePattern struct {
-	Match       string `mapstructure:"match" json:"match" yaml:"match"`                               // Marker text to match, e.g. "【TIMICC】"
-	ReplaceWith string `mapstructure:"replace_with" json:"replace_with" yaml:"replace_with"`           // Replacement text (empty string = delete)
-	TrimAfter   string `mapstructure:"trim_after" json:"trim_after,omitempty" yaml:"trim_after,omitempty"` // Extend match forward until this separator, e.g. "\n\n"
+	Match          string `mapstructure:"match" json:"match" yaml:"match"`                                        // Marker text to match, e.g. "【ADTEST】"
+	ReplaceWith    string `mapstructure:"replace_with" json:"replace_with" yaml:"replace_with"`                    // Replacement text (empty string = delete)
+	TrimAfter      string `mapstructure:"trim_after" json:"trim_after,omitempty" yaml:"trim_after,omitempty"`      // Extend match forward until this separator, e.g. "\n\n"
+	StripZeroWidth bool   `mapstructure:"strip_zero_width" json:"strip_zero_width,omitempty" yaml:"strip_zero_width,omitempty"` // Strip zero-width Unicode chars before matching
 }
 
 // ParamCondition defines a condition for matching tool parameters

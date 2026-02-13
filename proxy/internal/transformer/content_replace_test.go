@@ -18,10 +18,10 @@ func TestContentReplacer_Process(t *testing.T) {
 		{
 			name: "remove ad with trim_after",
 			patterns: []ContentReplacePattern{
-				{Match: "【TIMICC】", TrimAfter: "\n\n", ReplaceWith: ""},
+				{Match: "【ADTEST】", TrimAfter: "\n\n", ReplaceWith: ""},
 			},
 			deltas: []string{
-				"【TIMICC】https://timicc.com 马年特惠活动进行中，官方QQ群：137810429\n\n\n\nHi",
+				"【ADTEST】https://example.com promo text\n\n\n\nHi",
 				"! How",
 				" can I help you today?",
 			},
@@ -34,7 +34,7 @@ func TestContentReplacer_Process(t *testing.T) {
 		{
 			name: "no match passes through",
 			patterns: []ContentReplacePattern{
-				{Match: "【TIMICC】", TrimAfter: "\n\n", ReplaceWith: ""},
+				{Match: "【ADTEST】", TrimAfter: "\n\n", ReplaceWith: ""},
 			},
 			deltas: []string{
 				"Hello world",
@@ -74,10 +74,10 @@ func TestContentReplacer_Process(t *testing.T) {
 		{
 			name: "ad only in first delta, match at beginning",
 			patterns: []ContentReplacePattern{
-				{Match: "【TIMICC】", TrimAfter: "\n\n", ReplaceWith: ""},
+				{Match: "【ADTEST】", TrimAfter: "\n\n", ReplaceWith: ""},
 			},
 			deltas: []string{
-				"【TIMICC】ad text\n\n",
+				"【ADTEST】ad text\n\n",
 				"actual content",
 			},
 			want: []string{
@@ -88,10 +88,46 @@ func TestContentReplacer_Process(t *testing.T) {
 		{
 			name: "match with content before marker",
 			patterns: []ContentReplacePattern{
-				{Match: "【TIMICC】", TrimAfter: "\n\n", ReplaceWith: ""},
+				{Match: "【ADTEST】", TrimAfter: "\n\n", ReplaceWith: ""},
 			},
 			deltas: []string{
-				"prefix【TIMICC】ad text\n\nsuffix",
+				"prefix【ADTEST】ad text\n\nsuffix",
+			},
+			want: []string{
+				"prefixsuffix",
+			},
+		},
+		{
+			name: "strip_zero_width removes obfuscated ad",
+			patterns: []ContentReplacePattern{
+				{Match: "【ADTEST】", TrimAfter: "\n\n", StripZeroWidth: true},
+			},
+			deltas: []string{
+				"【\u200CADTE\uFEFFST\u2060】https://example.com promo\n\n\n\nHi there",
+			},
+			want: []string{
+				"Hi there",
+			},
+		},
+		{
+			name: "strip_zero_width no match passes through",
+			patterns: []ContentReplacePattern{
+				{Match: "【ADTEST】", TrimAfter: "\n\n", StripZeroWidth: true},
+			},
+			deltas: []string{
+				"Hello world",
+			},
+			want: []string{
+				"Hello world",
+			},
+		},
+		{
+			name: "strip_zero_width with content before marker",
+			patterns: []ContentReplacePattern{
+				{Match: "【ADTEST】", TrimAfter: "\n\n", StripZeroWidth: true},
+			},
+			deltas: []string{
+				"prefix【\u200CADTE\uFEFFST\u2060】ad\n\nsuffix",
 			},
 			want: []string{
 				"prefixsuffix",
@@ -147,12 +183,12 @@ func TestContentReplacer_ProcessNonStreaming(t *testing.T) {
 	def := &TransformerDef{
 		Name: "test",
 		ContentPatterns: []ContentReplacePattern{
-			{Match: "【TIMICC】", TrimAfter: "\n\n", ReplaceWith: ""},
+			{Match: "【ADTEST】", TrimAfter: "\n\n", ReplaceWith: ""},
 		},
 	}
 	cr := NewContentReplacer(def, logger)
 
-	text := "【TIMICC】https://timicc.com ad\n\n\n\nHello world"
+	text := "【ADTEST】https://example.com ad\n\n\n\nHello world"
 	got := cr.ProcessNonStreaming(text)
 	want := "Hello world"
 	if got != want {

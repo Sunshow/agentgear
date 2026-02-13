@@ -2,9 +2,60 @@ package transformer
 
 import (
 	"strings"
+	"unicode"
 
 	"go.uber.org/zap"
 )
+
+// isZeroWidthRune returns true if the rune is a zero-width or invisible Unicode character.
+func isZeroWidthRune(r rune) bool {
+	switch {
+	case r == 0x00AD: // soft hyphen
+		return true
+	case r == 0x034F: // combining grapheme joiner
+		return true
+	case r == 0x061C: // Arabic letter mark
+		return true
+	case r == 0x200B: // zero-width space
+		return true
+	case r == 0x200C: // zero-width non-joiner
+		return true
+	case r == 0x200D: // zero-width joiner
+		return true
+	case r == 0xFEFF: // BOM / zero-width no-break space
+		return true
+	case r >= 0x2060 && r <= 0x2064: // word joiner, invisible operators
+		return true
+	case r >= 0xFE00 && r <= 0xFE0F: // variation selectors
+		return true
+	case r == 0x115F || r == 0x1160: // Hangul Choseong/Jungseong fillers
+		return true
+	case unicode.Is(unicode.Cf, r): // general format characters
+		return true
+	}
+	return false
+}
+
+// stripZeroWidthChars removes all zero-width Unicode characters from text.
+// Returns the cleaned string and a mapping from cleaned-string byte offsets
+// to original-string byte offsets.
+func stripZeroWidthChars(text string) (string, []int) {
+	var buf strings.Builder
+	buf.Grow(len(text))
+	mapping := make([]int, 0, len(text))
+	for i, r := range text {
+		if !isZeroWidthRune(r) {
+			runeStr := text[i : i+len(string(r))]
+			buf.WriteString(runeStr)
+			for j := range len(runeStr) {
+				mapping = append(mapping, i+j)
+			}
+		}
+	}
+	// sentinel: map end-of-cleaned to end-of-original
+	mapping = append(mapping, len(text))
+	return buf.String(), mapping
+}
 
 // ContentReplacer handles text content replacement in streaming responses.
 // It buffers the first delta to detect and remove ad-like prefixes,
@@ -55,41 +106,70 @@ func (cr *ContentReplacer) Process(text string) string {
 
 func (cr *ContentReplacer) applyPatterns(text string) string {
 	for _, p := range cr.patterns {
-		idx := strings.Index(text, p.Match)
-		if idx < 0 {
-			continue
+		if p.StripZeroWidth {
+			text = cr.applyPatternStripped(text, p)
+		} else {
+			text = cr.applyPatternExact(text, p)
 		}
+	}
+	return text
+}
 
-		// Find the end of the ad segment
-		endIdx := idx + len(p.Match)
-
-		if p.TrimAfter != "" {
-			// Find the trim_after separator after the match marker
-			afterMatch := text[endIdx:]
-			sepIdx := strings.Index(afterMatch, p.TrimAfter)
-			if sepIdx >= 0 {
-				// Move past the separator
-				endIdx += sepIdx + len(p.TrimAfter)
-				// Continue consuming additional matching separators (e.g. extra \n)
-				remaining := text[endIdx:]
-				trimmed := strings.TrimLeft(remaining, "\n\r ")
-				endIdx += len(remaining) - len(trimmed)
-			} else {
-				// No separator found, remove from match to end
-				endIdx = len(text)
-			}
-		}
-
-		before := text[:idx]
-		after := text[endIdx:]
-		text = before + p.ReplaceWith + after
-
-		cr.logger.Info("content_replace applied",
-			zap.String("transformer", cr.name),
-			zap.String("match", p.Match))
+func (cr *ContentReplacer) applyPatternExact(text string, p ContentReplacePattern) string {
+	idx := strings.Index(text, p.Match)
+	if idx < 0 {
+		return text
 	}
 
-	return text
+	endIdx := idx + len(p.Match)
+	endIdx = cr.extendTrimAfter(text, endIdx, p.TrimAfter)
+
+	cr.logger.Info("content_replace applied",
+		zap.String("transformer", cr.name),
+		zap.String("match", p.Match))
+
+	return text[:idx] + p.ReplaceWith + text[endIdx:]
+}
+
+func (cr *ContentReplacer) applyPatternStripped(text string, p ContentReplacePattern) string {
+	cleaned, mapping := stripZeroWidthChars(text)
+
+	idx := strings.Index(cleaned, p.Match)
+	if idx < 0 {
+		return text
+	}
+
+	// Map cleaned offsets back to original offsets
+	origStart := mapping[idx]
+	cleanedEnd := idx + len(p.Match)
+	origEnd := mapping[cleanedEnd]
+
+	// For TrimAfter, work on the original text from origEnd onward
+	origEnd = cr.extendTrimAfter(text, origEnd, p.TrimAfter)
+
+	cr.logger.Info("content_replace applied (strip_zero_width)",
+		zap.String("transformer", cr.name),
+		zap.String("match", p.Match))
+
+	return text[:origStart] + p.ReplaceWith + text[origEnd:]
+}
+
+func (cr *ContentReplacer) extendTrimAfter(text string, endIdx int, trimAfter string) int {
+	if trimAfter == "" {
+		return endIdx
+	}
+
+	afterMatch := text[endIdx:]
+	sepIdx := strings.Index(afterMatch, trimAfter)
+	if sepIdx >= 0 {
+		endIdx += sepIdx + len(trimAfter)
+		remaining := text[endIdx:]
+		trimmed := strings.TrimLeft(remaining, "\n\r ")
+		endIdx += len(remaining) - len(trimmed)
+	} else {
+		endIdx = len(text)
+	}
+	return endIdx
 }
 
 // ProcessNonStreaming applies replacement patterns to a complete text string (for non-streaming responses).
