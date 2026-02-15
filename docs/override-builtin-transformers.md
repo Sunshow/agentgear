@@ -138,7 +138,7 @@ cd proxy
 可以覆盖的内置 transformer：
 
 ### Error Transform 类型
-- `$droid_upstream_kiro_force_compress` - Droid + Kiro 上下文超限检测
+- `$droid_upstream_kiro_force_compress` - Droid + Kiro 上下文超限检测（基于模板 `$tpl_force_hint_context_length_exceeded`）
 - `$input_too_long_error_transform` - 上游错误模式匹配转换
 
 ### Compress 类型
@@ -162,6 +162,7 @@ cd proxy
 
 - `$tpl_tool_alias` - 工具别名模板（参数：`direction`, `source`, `target`）
 - `$tpl_chunked_write_hint` - 分段写入提示模板（参数：`line_threshold`, `chunk_size`）
+- `$tpl_force_hint_context_length_exceeded` - 上下文超限提示模板（参数：`error_code`, `error_message`, `request_size_threshold`, `context_token_limit`, `context_threshold_ratio`, `token_estimate_ratio`, `image_token_estimate`）
 
 ## 使用模板自定义分段写入提示
 
@@ -212,5 +213,74 @@ transformers:
 | `chunk_size` | 每次 Edit 调用的建议行数 | 100 |
 
 > **注意**：模板中的 `{{tool}}` 占位符会在实际注入时根据匹配的工具名自动替换，无需在 `template_args` 中配置。
+
+## 使用模板自定义上下文超限提示
+
+内置的 `$droid_upstream_kiro_force_compress` 默认绑定 `$a_droid` + `$u_kiro` 标签，70% 阈值触发。你可以通过模板为其他 Agent 创建新的实例。
+
+### 示例：为不同 Agent 创建不同的触发策略
+
+```yaml
+transformers:
+  definitions:
+    # Cursor 使用 60% 阈值（更早触发）
+    - name: "cursor_kiro_force_compress"
+      description: "Cursor+Kiro 触发压缩（60% 阈值）"
+      template_ref: "$tpl_force_hint_context_length_exceeded"
+      template_args:
+        error_code: "context_length_exceeded"
+        error_message: "prompt is too long: request size exceeds limit"
+        request_size_threshold: "500000"
+        context_token_limit: "200000"
+        context_threshold_ratio: "0.6"
+        token_estimate_ratio: "3.5"
+        image_token_estimate: "1600"
+
+    # OpenCode 使用 80% 阈值（更晚触发）
+    - name: "opencode_force_compress"
+      description: "OpenCode 触发压缩（80% 阈值）"
+      template_ref: "$tpl_force_hint_context_length_exceeded"
+      template_args:
+        error_code: "context_length_exceeded"
+        error_message: "context window exceeded"
+        request_size_threshold: "300000"
+        context_token_limit: "200000"
+        context_threshold_ratio: "0.8"
+        token_estimate_ratio: "3.5"
+        image_token_estimate: "1600"
+
+  mappings:
+    - name: "cursor_kiro_force_compress_mapping"
+      enabled: true
+      tags: ["$a_cursor", "$u_kiro"]
+      transformer: "cursor_kiro_force_compress"
+
+    - name: "opencode_force_compress_mapping"
+      enabled: true
+      tags: ["$a_opencode", "$g_my_gateway"]
+      transformer: "opencode_force_compress"
+```
+
+### 模板参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `error_code` | 返回的错误码 | 无（必填） |
+| `error_message` | 返回的错误消息 | 无（必填） |
+| `request_size_threshold` | 响应后兜底检测阈值（字节） | 无（必填） |
+| `context_token_limit` | token 限制 | 无（必填） |
+| `context_threshold_ratio` | 触发比例（0-1），越小越早触发 | 无（必填） |
+| `token_estimate_ratio` | 字节到 token 的估算比率 | 无（必填） |
+| `image_token_estimate` | 单张图片估算 token 数 | 无（必填） |
+
+### 阈值参考表
+
+| 阈值 | 200K 模型触发点 | 适用场景 |
+|------|----------------|---------|
+| 0.5  | 100K tokens    | 激进，频繁触发 |
+| 0.6  | 120K tokens    | 较早触发 |
+| 0.7  | 140K tokens    | 默认配置 |
+| 0.8  | 160K tokens    | 保守 |
+| 0.9  | 180K tokens    | 接近上限才触发 |
 
 完整列表请参考 `proxy/internal/transformer/builtin.go`。

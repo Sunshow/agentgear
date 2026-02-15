@@ -257,3 +257,134 @@ func TestNewRegistry_OverrideCompressTransformer(t *testing.T) {
 		t.Errorf("Expected AutoRetry=true, got false")
 	}
 }
+
+func TestResolveTemplate_ForceHintContextLengthExceeded(t *testing.T) {
+	// Create a registry with the template and an instance
+	cfg := Config{
+		Definitions: []TransformerDef{
+			{
+				Name:                     "$tpl_force_hint_context_length_exceeded",
+				Type:                     "error_transform",
+				Direction:                "response",
+				ErrorCode:                "{{error_code}}",
+				ErrorMessage:             "{{error_message}}",
+				RequestSizeThresholdTpl:  "{{request_size_threshold}}",
+				ContextTokenLimitTpl:     "{{context_token_limit}}",
+				ContextThresholdRatioTpl: "{{context_threshold_ratio}}",
+				TokenEstimateRatioTpl:    "{{token_estimate_ratio}}",
+				ImageTokenEstimateTpl:    "{{image_token_estimate}}",
+				IsTemplate:               true,
+			},
+			{
+				Name:        "test_force_compress",
+				TemplateRef: "$tpl_force_hint_context_length_exceeded",
+				TemplateArgs: map[string]string{
+					"error_code":              "context_length_exceeded",
+					"error_message":           "test error message",
+					"request_size_threshold":  "300000",
+					"context_token_limit":     "150000",
+					"context_threshold_ratio": "0.8",
+					"token_estimate_ratio":    "4.0",
+					"image_token_estimate":    "2000",
+				},
+			},
+		},
+	}
+
+	registry := NewRegistry(cfg)
+
+	// Find the resolved instance
+	var found *TransformerDef
+	for i := range registry.definitions {
+		if registry.definitions[i].Name == "test_force_compress" {
+			found = &registry.definitions[i]
+			break
+		}
+	}
+
+	if found == nil {
+		t.Fatal("Expected to find test_force_compress definition")
+	}
+
+	// Verify template was resolved
+	if found.TemplateRef != "" {
+		t.Errorf("Expected TemplateRef to be cleared after resolution, got %s", found.TemplateRef)
+	}
+	if found.Type != "error_transform" {
+		t.Errorf("Expected Type=error_transform, got %s", found.Type)
+	}
+	if found.Direction != "response" {
+		t.Errorf("Expected Direction=response, got %s", found.Direction)
+	}
+	if found.ErrorCode != "context_length_exceeded" {
+		t.Errorf("Expected ErrorCode=context_length_exceeded, got %s", found.ErrorCode)
+	}
+	if found.ErrorMessage != "test error message" {
+		t.Errorf("Expected ErrorMessage='test error message', got %s", found.ErrorMessage)
+	}
+	if found.RequestSizeThreshold != 300000 {
+		t.Errorf("Expected RequestSizeThreshold=300000, got %d", found.RequestSizeThreshold)
+	}
+	if found.ContextTokenLimit != 150000 {
+		t.Errorf("Expected ContextTokenLimit=150000, got %d", found.ContextTokenLimit)
+	}
+	if found.ContextThresholdRatio != 0.8 {
+		t.Errorf("Expected ContextThresholdRatio=0.8, got %f", found.ContextThresholdRatio)
+	}
+	if found.TokenEstimateRatio != 4.0 {
+		t.Errorf("Expected TokenEstimateRatio=4.0, got %f", found.TokenEstimateRatio)
+	}
+	if found.ImageTokenEstimate != 2000 {
+		t.Errorf("Expected ImageTokenEstimate=2000, got %d", found.ImageTokenEstimate)
+	}
+}
+
+func TestResolveTemplate_BuiltinForceCompress(t *testing.T) {
+	// Test that the builtin $droid_upstream_kiro_force_compress is properly resolved from template
+	registry := NewRegistry(Config{})
+
+	// Find the builtin definition
+	var found *TransformerDef
+	for i := range registry.definitions {
+		if registry.definitions[i].Name == "$droid_upstream_kiro_force_compress" {
+			found = &registry.definitions[i]
+			break
+		}
+	}
+
+	if found == nil {
+		t.Fatal("Expected to find $droid_upstream_kiro_force_compress definition")
+	}
+
+	// Verify it was resolved from template
+	if found.TemplateRef != "" {
+		t.Errorf("Expected TemplateRef to be cleared after resolution, got %s", found.TemplateRef)
+	}
+	if found.Type != "error_transform" {
+		t.Errorf("Expected Type=error_transform, got %s", found.Type)
+	}
+	if found.Direction != "response" {
+		t.Errorf("Expected Direction=response, got %s", found.Direction)
+	}
+	if found.ErrorCode != "context_length_exceeded" {
+		t.Errorf("Expected ErrorCode=context_length_exceeded, got %s", found.ErrorCode)
+	}
+	if found.ErrorMessage != "prompt is too long: request size exceeds limit" {
+		t.Errorf("Expected specific error message, got %s", found.ErrorMessage)
+	}
+	if found.RequestSizeThreshold != 500000 {
+		t.Errorf("Expected RequestSizeThreshold=500000, got %d", found.RequestSizeThreshold)
+	}
+	if found.ContextTokenLimit != 200000 {
+		t.Errorf("Expected ContextTokenLimit=200000, got %d", found.ContextTokenLimit)
+	}
+	if found.ContextThresholdRatio != 0.7 {
+		t.Errorf("Expected ContextThresholdRatio=0.7, got %f", found.ContextThresholdRatio)
+	}
+	if found.TokenEstimateRatio != 3.5 {
+		t.Errorf("Expected TokenEstimateRatio=3.5, got %f", found.TokenEstimateRatio)
+	}
+	if found.ImageTokenEstimate != 1600 {
+		t.Errorf("Expected ImageTokenEstimate=1600, got %d", found.ImageTokenEstimate)
+	}
+}

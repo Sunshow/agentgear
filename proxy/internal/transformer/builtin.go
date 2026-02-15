@@ -12,6 +12,21 @@ var BuiltinTemplates = []TransformerDef{
 		Builtin:     true,
 	},
 	{
+		Name:                    "$tpl_force_hint_context_length_exceeded",
+		Description:             "上下文超限提示模板：通过返回 context_length_exceeded 错误触发 Agent 自身压缩",
+		Type:                    "error_transform",
+		Direction:               "response",
+		ErrorCode:               "{{error_code}}",
+		ErrorMessage:            "{{error_message}}",
+		RequestSizeThresholdTpl: "{{request_size_threshold}}",
+		ContextTokenLimitTpl:    "{{context_token_limit}}",
+		ContextThresholdRatioTpl: "{{context_threshold_ratio}}",
+		TokenEstimateRatioTpl:   "{{token_estimate_ratio}}",
+		ImageTokenEstimateTpl:   "{{image_token_estimate}}",
+		IsTemplate:              true,
+		Builtin:                 true,
+	},
+	{
 		Name:         "$tpl_chunked_write_hint",
 		Description:  "分段写入提示模板：可配置行数阈值和分块大小",
 		Type:         "message_inject",
@@ -133,18 +148,19 @@ var BuiltinDefinitions = []TransformerDef{
 
 	// === 错误转换类型转换器 ===
 	{
-		Name:                  "$droid_upstream_kiro_force_compress",
-		Description:           "基于 token 估算预检测上下文超限，触发 Droid 压缩",
-		Direction:             "response",
-		Type:                  "error_transform",
-		ErrorCode:             "context_length_exceeded",
-		ErrorMessage:          "prompt is too long: request size exceeds limit",
-		RequestSizeThreshold:  500000, // 响应后兜底检测阈值 500KB
-		ContextTokenLimit:     200000, // 所有模型统一使用 200K token 限制
-		ContextThresholdRatio: 0.7,    // 70% 触发（更早压缩）
-		TokenEstimateRatio:    3.5,
-		ImageTokenEstimate:    1600, // 单张图片估算 1600 tokens
-		Builtin:               true,
+		Name:        "$droid_upstream_kiro_force_compress",
+		Description: "基于 token 估算预检测上下文超限，触发 Droid 压缩",
+		TemplateRef: "$tpl_force_hint_context_length_exceeded",
+		TemplateArgs: map[string]string{
+			"error_code":              "context_length_exceeded",
+			"error_message":           "prompt is too long: request size exceeds limit",
+			"request_size_threshold":  "500000",
+			"context_token_limit":     "200000",
+			"context_threshold_ratio": "0.7",
+			"token_estimate_ratio":    "3.5",
+			"image_token_estimate":    "1600",
+		},
+		Builtin: true,
 	},
 	// === 压缩类型转换器 ===
 	{
@@ -157,10 +173,6 @@ var BuiltinDefinitions = []TransformerDef{
 		ContextTokenLimit:     200000,
 		ContextThresholdRatio: 0.7,
 		TokenEstimateRatio:    3.5,
-		ModelContextLimits: []ModelContextLimit{
-			{ModelPattern: "claude-opus-4-6*", TokenLimit: 1000000},
-			{ModelPattern: "claude-opus-4.6*", TokenLimit: 1000000},
-		},
 
 		// 压缩配置
 		CompressTarget: "same",

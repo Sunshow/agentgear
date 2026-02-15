@@ -73,6 +73,55 @@ transformers:
 - 找到 `match` 标记后，从标记位置开始，向后查找 `trim_after` 分隔符，将整段（含尾部空行）替换为 `replace_with`
 - 后续 delta 直接透传，不再检测
 
+## error_transform 类型：触发 Agent 自身压缩
+
+通过返回 `context_length_exceeded` 错误，触发 Agent（如 Droid）自身的压缩机制。
+
+### 内置模板 `$tpl_force_hint_context_length_exceeded`
+
+系统提供了模板，用户可基于模板创建多个实例，为不同 Agent + Upstream 组合配置不同的触发策略。
+
+### 模板参数
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `error_code` | 返回的错误码 | `context_length_exceeded` |
+| `error_message` | 返回的错误消息 | `prompt is too long: request size exceeds limit` |
+| `request_size_threshold` | 响应后兜底检测阈值（字节） | `500000` |
+| `context_token_limit` | token 限制 | `200000` |
+| `context_threshold_ratio` | 触发比例（0-1） | `0.7` |
+| `token_estimate_ratio` | 字节到 token 的估算比率 | `3.5` |
+| `image_token_estimate` | 单张图片估算 token 数 | `1600` |
+
+### 配置示例
+
+```yaml
+transformers:
+  definitions:
+    - name: "cursor_kiro_force_compress"
+      description: "Cursor+Kiro 触发压缩（60% 阈值）"
+      template_ref: "$tpl_force_hint_context_length_exceeded"
+      template_args:
+        error_code: "context_length_exceeded"
+        error_message: "prompt is too long: request size exceeds limit"
+        request_size_threshold: "500000"
+        context_token_limit: "200000"
+        context_threshold_ratio: "0.6"
+        token_estimate_ratio: "3.5"
+        image_token_estimate: "1600"
+
+  mappings:
+    - name: "cursor_kiro_force_compress_mapping"
+      enabled: true
+      tags: ["$a_cursor", "$u_kiro"]
+      transformer: "cursor_kiro_force_compress"
+```
+
+### 内置实例
+
+- `$droid_upstream_kiro_force_compress`：Droid + Kiro 场景，70% 阈值，200K token 限制
+- 对应 mapping：`$droid_upstream_kiro_force_compress_mapping`（tags: `$a_droid` + `$u_kiro`）
+
 ## 详细设计文档
 
 - [模板化转换器设计](../模板化转换器设计.md) - 转换器模板化设计方案

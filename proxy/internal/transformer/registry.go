@@ -3,6 +3,7 @@ package transformer
 import (
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -119,11 +120,59 @@ func (r *Registry) resolveTemplate(def *TransformerDef) *TransformerDef {
 	if tpl.InjectText != "" && resolved.InjectText == "" {
 		resolved.InjectText = replacePlaceholder(tpl.InjectText, def.TemplateArgs)
 	}
+	// Resolve error_transform fields from template
+	if tpl.ErrorCode != "" && resolved.ErrorCode == "" {
+		resolved.ErrorCode = replacePlaceholder(tpl.ErrorCode, def.TemplateArgs)
+	}
+	if tpl.ErrorMessage != "" && resolved.ErrorMessage == "" {
+		resolved.ErrorMessage = replacePlaceholder(tpl.ErrorMessage, def.TemplateArgs)
+	}
+	if tpl.RequestSizeThresholdTpl != "" && resolved.RequestSizeThreshold == 0 {
+		resolved.RequestSizeThreshold = parseIntPlaceholder(tpl.RequestSizeThresholdTpl, def.TemplateArgs, 0)
+	}
+	if tpl.ContextTokenLimitTpl != "" && resolved.ContextTokenLimit == 0 {
+		resolved.ContextTokenLimit = parseIntPlaceholder(tpl.ContextTokenLimitTpl, def.TemplateArgs, 0)
+	}
+	if tpl.ContextThresholdRatioTpl != "" && resolved.ContextThresholdRatio == 0 {
+		resolved.ContextThresholdRatio = parseFloatPlaceholder(tpl.ContextThresholdRatioTpl, def.TemplateArgs, 0)
+	}
+	if tpl.TokenEstimateRatioTpl != "" && resolved.TokenEstimateRatio == 0 {
+		resolved.TokenEstimateRatio = parseFloatPlaceholder(tpl.TokenEstimateRatioTpl, def.TemplateArgs, 0)
+	}
+	if tpl.ImageTokenEstimateTpl != "" && resolved.ImageTokenEstimate == 0 {
+		resolved.ImageTokenEstimate = parseIntPlaceholder(tpl.ImageTokenEstimateTpl, def.TemplateArgs, 0)
+	}
 	// Clear template ref after resolution
 	resolved.TemplateRef = ""
 	resolved.TemplateArgs = nil
 
 	return &resolved
+}
+
+// parseIntPlaceholder resolves a template placeholder string to int
+func parseIntPlaceholder(tpl string, args map[string]string, defaultVal int) int {
+	s := replacePlaceholder(tpl, args)
+	if s == "" || strings.Contains(s, "{{") {
+		return defaultVal
+	}
+	val, err := strconv.Atoi(s)
+	if err != nil {
+		return defaultVal
+	}
+	return val
+}
+
+// parseFloatPlaceholder resolves a template placeholder string to float64
+func parseFloatPlaceholder(tpl string, args map[string]string, defaultVal float64) float64 {
+	s := replacePlaceholder(tpl, args)
+	if s == "" || strings.Contains(s, "{{") {
+		return defaultVal
+	}
+	val, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return val
 }
 
 // replacePlaceholder replaces {{key}} placeholders with values from args

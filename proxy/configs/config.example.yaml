@@ -209,15 +209,32 @@ transformers:
     #   token_estimate_ratio: 3.5      # Bytes to tokens estimation ratio
     #   image_token_estimate: 1600     # Single image token estimate (default 1600, Anthropic medium-size image ~1600 tokens)
 
+    # === Using template: $tpl_force_hint_context_length_exceeded ===
+    # Example: Create custom force compress transformer for Cursor agent (60% threshold)
+    # - name: "cursor_kiro_force_compress"
+    #   description: "Cursor+Kiro 触发压缩（60% 阈值）"
+    #   template_ref: "$tpl_force_hint_context_length_exceeded"
+    #   template_args:
+    #     error_code: "context_length_exceeded"
+    #     error_message: "prompt is too long: request size exceeds limit"
+    #     request_size_threshold: "500000"
+    #     context_token_limit: "200000"
+    #     context_threshold_ratio: "0.6"
+    #     token_estimate_ratio: "3.5"
+    #     image_token_estimate: "1600"
+
     # Example: Override builtin $droid_upstream_kiro_force_compress to adjust threshold
     # - name: "$droid_upstream_kiro_force_compress"
     #   description: "Override builtin error transformer with custom threshold"
-    #   type: "error_transform"
-    #   direction: "response"
-    #   error_code: "context_length_exceeded"
-    #   error_message: "prompt is too long: request size exceeds limit"
-    #   request_size_threshold: 500000
-    #   context_token_limit: 200000
+    #   template_ref: "$tpl_force_hint_context_length_exceeded"
+    #   template_args:
+    #     error_code: "context_length_exceeded"
+    #     error_message: "prompt is too long: request size exceeds limit"
+    #     request_size_threshold: "500000"
+    #     context_token_limit: "200000"
+    #     context_threshold_ratio: "0.6"  # Override: 60% instead of default 70%
+    #     token_estimate_ratio: "3.5"
+    #     image_token_estimate: "1600"
     #   context_threshold_ratio: 0.6  # Override: 60% instead of default 70%
     #   token_estimate_ratio: 3.5
     #   image_token_estimate: 1600     # Single image token estimate (default 1600)
@@ -396,4 +413,11 @@ transformers:
     #   tags: ["$u_kiro"]
     #   exclude_tags: ["$a_droid"]
     #   transformer: "$generic_400_auto_compress_retry"
+
+    # Example: Enable force compress hint for Cursor agent via template instance
+    # - name: "cursor_kiro_force_compress_mapping"
+    #   description: "Cursor+Kiro: 触发 Cursor 自身压缩"
+    #   enabled: true
+    #   tags: ["$a_cursor", "$u_kiro"]
+    #   transformer: "cursor_kiro_force_compress"
 

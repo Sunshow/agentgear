@@ -81,6 +81,12 @@ type TransformerDef struct {
 	IsTemplate           bool   `mapstructure:"is_template" json:"is_template,omitempty" yaml:"is_template,omitempty"`
 	TemplateRef          string `mapstructure:"template_ref" json:"template_ref,omitempty" yaml:"template_ref,omitempty"`
 	TemplateArgs         map[string]string `mapstructure:"template_args" json:"template_args,omitempty" yaml:"template_args,omitempty"`
+	// 模板专用：数值字段的字符串版本（仅 IsTemplate=true 时使用，支持 {{placeholder}} 占位符）
+	RequestSizeThresholdTpl  string `mapstructure:"request_size_threshold_tpl" json:"request_size_threshold_tpl,omitempty" yaml:"request_size_threshold_tpl,omitempty"`
+	ContextTokenLimitTpl     string `mapstructure:"context_token_limit_tpl" json:"context_token_limit_tpl,omitempty" yaml:"context_token_limit_tpl,omitempty"`
+	ContextThresholdRatioTpl string `mapstructure:"context_threshold_ratio_tpl" json:"context_threshold_ratio_tpl,omitempty" yaml:"context_threshold_ratio_tpl,omitempty"`
+	TokenEstimateRatioTpl    string `mapstructure:"token_estimate_ratio_tpl" json:"token_estimate_ratio_tpl,omitempty" yaml:"token_estimate_ratio_tpl,omitempty"`
+	ImageTokenEstimateTpl    string `mapstructure:"image_token_estimate_tpl" json:"image_token_estimate_tpl,omitempty" yaml:"image_token_estimate_tpl,omitempty"`
 }
 
 // MappingRule binds a transformer to conditions (tags/gateways)
