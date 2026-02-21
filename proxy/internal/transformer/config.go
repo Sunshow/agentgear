@@ -1,9 +1,10 @@
 package transformer
 
 type ParamMapping struct {
-	From      string `mapstructure:"from" json:"from" yaml:"from"`
-	To        string `mapstructure:"to" json:"to" yaml:"to"`
-	Transform string `mapstructure:"transform" json:"transform,omitempty" yaml:"transform,omitempty"`
+	From          string            `mapstructure:"from" json:"from" yaml:"from"`
+	To            string            `mapstructure:"to" json:"to" yaml:"to"`
+	Transform     string            `mapstructure:"transform" json:"transform,omitempty" yaml:"transform,omitempty"`
+	TransformArgs map[string]string `mapstructure:"transform_args" json:"transform_args,omitempty" yaml:"transform_args,omitempty"`
 }
 
 // ContentReplacePattern defines a text replacement rule for response content

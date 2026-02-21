@@ -451,6 +451,16 @@ func (r *Registry) TransformInput(cfg *TransformerConfig, input map[string]inter
 			}
 		}
 
+		if pm.Transform == "prefix_replace" {
+			if s, ok := value.(string); ok {
+				oldPrefix := pm.TransformArgs["old_prefix"]
+				newPrefix := pm.TransformArgs["new_prefix"]
+				if strings.HasPrefix(s, oldPrefix) {
+					value = newPrefix + strings.TrimPrefix(s, oldPrefix)
+				}
+			}
+		}
+
 		setValue(result, pm.To, value)
 
 		fromKey := strings.Split(pm.From, "[")[0]

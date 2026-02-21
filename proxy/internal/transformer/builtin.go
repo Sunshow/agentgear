@@ -62,6 +62,28 @@ var BuiltinDefinitions = []TransformerDef{
 		Builtin: true,
 	},
 	{
+		Name:        "$droid_warp_Read_claude_plans",
+		Description: "将 Read(.claude/plans/) 路径转换为 Droid spec 路径",
+		Direction:   "response",
+		SourceTool:  "Read",
+		TargetTool:  "Read",
+		ParamConditions: []ParamCondition{
+			{Param: "file_path", Op: "prefix", Value: ".claude/plans/"},
+		},
+		ParamMapping: []ParamMapping{
+			{
+				From:      "file_path",
+				To:        "file_path",
+				Transform: "prefix_replace",
+				TransformArgs: map[string]string{
+					"old_prefix": ".claude/plans/",
+					"new_prefix": ".factory/specs/",
+				},
+			},
+		},
+		Builtin: true,
+	},
+	{
 		Name:        "$droid_warp_Edit_normalize",
 		Description: "标准化 Edit 参数 (old_string->old_str, new_string->new_str)",
 		Direction:   "response",
@@ -265,6 +287,15 @@ var BuiltinMappings = []MappingRule{
 		Enabled:     true,
 		Tags:        []string{"$a_droid", "$u_warp"},
 		Transformer: "$droid_warp_Write_to_ExitSpecMode",
+		Builtin:     true,
+	},
+	// Droid + WARP 规格读取 (Read .claude/plans/ -> .factory/specs/)
+	{
+		Name:        "$droid_warp_read_claude_plans",
+		Description: "Droid+WARP: Read(.claude/plans/) 路径转换",
+		Enabled:     true,
+		Tags:        []string{"$a_droid", "$u_warp"},
+		Transformer: "$droid_warp_Read_claude_plans",
 		Builtin:     true,
 	},
 	// Droid + WARP Edit 参数标准化
