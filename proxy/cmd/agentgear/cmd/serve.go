@@ -22,7 +22,7 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the proxy server",
 	Long:  "Start the AgentGear proxy server with gateway routing, transformers, and API management.",
-	Run:   runServe,
+	RunE:  runServeE,
 }
 
 func init() {
@@ -30,13 +30,15 @@ func init() {
 
 	// Make serve the default command when no subcommand is specified
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
-		return serveCmd.RunE(cmd, args)
-	}
-	rootCmd.Run = func(cmd *cobra.Command, args []string) {
-		serveCmd.Run(cmd, args)
+		return runServeE(cmd, args)
 	}
 	// Copy the config flag to root as well for backward compatibility
 	rootCmd.Flags().StringVarP(&configPath, "config", "c", "", "path to config file")
+}
+
+func runServeE(cmd *cobra.Command, args []string) error {
+	runServe(cmd, args)
+	return nil
 }
 
 func runServe(cmd *cobra.Command, args []string) {
@@ -46,7 +48,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		actualConfigPath = "./configs/config.yaml"
 	}
 
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load(actualConfigPath)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
