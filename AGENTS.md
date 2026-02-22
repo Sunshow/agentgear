@@ -39,6 +39,9 @@ agentgear/
 4. 内存存储有容量限制，自动淘汰旧连接
 5. GUI 对话框**禁止**使用手写的 `fixed inset-0` modal 实现，必须使用 `ResizableDialog`
 6. GUI 优先使用项目已有的 UI 组件（Button, Input, Checkbox, Select, Tabs, ScrollArea），而非原生 HTML 元素
+7. 日志分两类：
+   - **Business Logger**：始终启用，记录业务逻辑（tagging 匹配、transformer 检测/执行、mapping 应用、压缩触发、错误转换、header 注入等），输出到控制台 + `agentgear.log` 文件（按天 rotate，保留 3 个）
+   - **Session Logger**：受 `logging.enabled` 控制，记录完整 session 数据（request/response body 文件）。`logging.enabled` 仅控制 session 完整日志，不影响业务日志
 
 ## 文档查阅指引
 

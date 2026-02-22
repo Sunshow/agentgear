@@ -65,17 +65,12 @@ func runServe(cmd *cobra.Command, args []string) {
 	log.Printf("Transformers: %d definitions, %d mappings", len(cfg.Transformers.Definitions), len(cfg.Transformers.Mappings))
 	log.Printf("===========================\n")
 
-	appLogger, err := logger.New(logger.Config{
-		Enabled:    cfg.Logging.Enabled,
-		Dir:        cfg.Logging.Dir,
-		MaxSize:    cfg.Logging.MaxSize,
-		MaxBackups: cfg.Logging.MaxBackups,
-		MaxAge:     cfg.Logging.MaxAge,
-	})
+	// Business logger: always enabled for tagging/transformer/mapping logs
+	businessLogger, err := logger.NewBusinessLogger(cfg.Logging.Dir)
 	if err != nil {
-		log.Fatalf("failed to create logger: %v", err)
+		log.Fatalf("failed to create business logger: %v", err)
 	}
-	defer appLogger.Sync()
+	defer businessLogger.Sync()
 
 	// Initialize config writer for CRUD operations
 	configWriter := config.NewConfigWriter(actualConfigPath, cfg)
@@ -92,7 +87,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	transformerRegistry := transformer.NewRegistry(cfg.Transformers)
 
 	// Initialize WebSocket hub
-	wsHub := api.NewWSHub(appLogger.Logger)
+	wsHub := api.NewWSHub(businessLogger.Logger)
 	go wsHub.Run()
 
 	// Start API server in goroutine
@@ -104,16 +99,16 @@ func runServe(cmd *cobra.Command, args []string) {
 			Tagging:      taggingEngine,
 			Transformer:  transformerRegistry,
 			ConfigWriter: configWriter,
-			Logger:       appLogger.Logger,
+			Logger:       businessLogger.Logger,
 		})
 		apiServer.SetWSHub(wsHub)
 
 		go func() {
 			if err := apiServer.Run(); err != nil {
-				appLogger.Sugar().Errorf("API server error: %v", err)
+				businessLogger.Sugar().Errorf("API server error: %v", err)
 			}
 		}()
-		appLogger.Sugar().Infof("API server starting on %s:%d", cfg.Server.APIHost, cfg.Server.APIPort)
+		businessLogger.Sugar().Infof("API server starting on %s:%d", cfg.Server.APIHost, cfg.Server.APIPort)
 	}
 
 	// Start proxy server
@@ -139,7 +134,7 @@ func runServe(cmd *cobra.Command, args []string) {
 			UpstreamURL:         gw.Upstream,
 			UpstreamType:        gw.Type,
 			Timeout:             time.Duration(gw.Timeout) * time.Second,
-			Logger:              appLogger.Logger,
+			BusinessLogger:      businessLogger.Logger,
 			LogDir:              cfg.Logging.Dir,
 			LogEnabled:          cfg.Logging.Enabled,
 			MemoryStore:         memoryStore,
@@ -149,7 +144,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		})
 
 		r.Any(gw.Path+"/*path", proxyHandler.ProxyRequest)
-		appLogger.Sugar().Infof("Gateway '%s' registered: %s/* -> %s", gw.Name, gw.Path, gw.Upstream)
+		businessLogger.Sugar().Infof("Gateway '%s' registered: %s/* -> %s", gw.Name, gw.Path, gw.Upstream)
 	}
 
 	if enabledGateways == 0 {
@@ -157,7 +152,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	appLogger.Sugar().Infof("AgentGear proxy starting on %s with %d gateway(s)", addr, enabledGateways)
+	businessLogger.Sugar().Infof("AgentGear proxy starting on %s with %d gateway(s)", addr, enabledGateways)
 
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("failed to start server: %v", err)

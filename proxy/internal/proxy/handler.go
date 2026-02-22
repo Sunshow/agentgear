@@ -33,7 +33,7 @@ type Handler struct {
 	upstreamURL         string
 	upstreamType        string
 	timeout             time.Duration
-	logger              *zap.Logger
+	businessLogger      *zap.Logger
 	logDir              string
 	logEnabled          bool
 	httpClient          *http.Client
@@ -51,7 +51,7 @@ type Config struct {
 	UpstreamURL         string
 	UpstreamType        string
 	Timeout             time.Duration
-	Logger              *zap.Logger
+	BusinessLogger      *zap.Logger
 	LogDir              string
 	LogEnabled          bool
 	MemoryStore         *memory.ConnectionStore
@@ -61,13 +61,18 @@ type Config struct {
 }
 
 func NewHandler(cfg Config) *Handler {
+	businessLogger := cfg.BusinessLogger
+	if businessLogger == nil {
+		// Fallback to nop logger if not provided
+		businessLogger = zap.NewNop()
+	}
 	h := &Handler{
 		gatewayName:         cfg.GatewayName,
 		gatewayPath:         cfg.GatewayPath,
 		upstreamURL:         cfg.UpstreamURL,
 		upstreamType:        cfg.UpstreamType,
 		timeout:             cfg.Timeout,
-		logger:              cfg.Logger,
+		businessLogger:      businessLogger,
 		logDir:              cfg.LogDir,
 		logEnabled:          cfg.LogEnabled,
 		httpClient:          &http.Client{Timeout: cfg.Timeout},
@@ -150,7 +155,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 
 	reqBody, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		h.logger.Error("failed to read request body", zap.Error(err))
+		h.businessLogger.Error("failed to read request body", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
 		return
 	}
@@ -167,27 +172,27 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 		}
 		tags = h.taggingEngine.Match(ctx)
 		if len(tags) > 0 {
-			h.logger.Info("request matched tags", zap.Strings("tags", tags))
+			h.businessLogger.Info("request matched tags", zap.Strings("tags", tags))
 		}
 	}
 
 	// Inject gateway tag
 	if h.gatewayName != "" {
 		gatewayTag := config.GetGatewayTag(h.gatewayName)
-		h.logger.Info("gateway tag injection",
+		h.businessLogger.Info("gateway tag injection",
 			zap.String("gatewayName", h.gatewayName),
 			zap.String("gatewayTag", gatewayTag))
 		if gatewayTag != "" {
 			tags = append(tags, gatewayTag)
 		}
 	} else {
-		h.logger.Info("gateway name is empty")
+		h.businessLogger.Info("gateway name is empty")
 	}
 
 	// Inject upstream type tag
 	if h.upstreamType != "" {
 		upstreamTag := config.GetUpstreamTag(h.upstreamType)
-		h.logger.Info("upstream tag injection",
+		h.businessLogger.Info("upstream tag injection",
 			zap.String("upstreamType", h.upstreamType),
 			zap.String("upstreamTag", upstreamTag))
 		if upstreamTag != "" {
@@ -195,7 +200,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 		}
 	}
 
-	h.logger.Info("final tags before store", zap.Strings("tags", tags))
+	h.businessLogger.Info("final tags before store", zap.Strings("tags", tags))
 
 	// Only store to memory when GUI is connected (has WebSocket clients)
 	shouldStore := h.wsHub != nil && h.wsHub.HasClients()
@@ -262,15 +267,15 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 
 	// 压缩处理：检测是否需要压缩上下文
 	if compressHandler := h.shouldCompress(reqCtx); compressHandler != nil {
-		h.logger.Info("compression triggered", zap.String("transformer", compressHandler.Name))
+		h.businessLogger.Info("compression triggered", zap.String("transformer", compressHandler.Name))
 		
 		// 构建压缩目标 URL
 		compressURL, err := h.buildCompressTargetURL(compressHandler)
 		if err != nil {
-			h.logger.Error("failed to build compress target URL", zap.Error(err))
+			h.businessLogger.Error("failed to build compress target URL", zap.Error(err))
 		} else {
 			// 创建压缩处理器
-			compressor := transformer.NewCompressHandler(compressHandler, h.logger, h.getGatewayMap())
+			compressor := transformer.NewCompressHandler(compressHandler, h.businessLogger, h.getGatewayMap())
 			
 			// 准备请求头（复制认证信息）
 			compressHeaders := make(map[string]string)
@@ -283,10 +288,10 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 			// 执行压缩
 			compressedReq, compressed, err := compressor.Process(transformedReqBody, compressURL, compressHeaders)
 			if err != nil {
-				h.logger.Error("compression failed", zap.Error(err))
+				h.businessLogger.Error("compression failed", zap.Error(err))
 				// 压缩失败，继续使用原请求（降级处理）
 			} else if compressed {
-				h.logger.Info("compression succeeded", 
+				h.businessLogger.Info("compression succeeded", 
 					zap.Int("original_size", len(transformedReqBody)),
 					zap.Int("compressed_size", len(compressedReq)))
 				transformedReqBody = compressedReq
@@ -304,12 +309,12 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 	}
 
 	// 消息格式修正（在发送前）
-	if sanitizer := h.transformerRegistry.GetMessageSanitizer(reqCtx.tags, h.logger); sanitizer != nil {
+	if sanitizer := h.transformerRegistry.GetMessageSanitizer(reqCtx.tags, h.businessLogger); sanitizer != nil {
 		sanitizedReq, sanitized, err := sanitizer.Sanitize(transformedReqBody)
 		if err != nil {
-			h.logger.Error("message sanitization failed", zap.Error(err))
+			h.businessLogger.Error("message sanitization failed", zap.Error(err))
 		} else if sanitized {
-			h.logger.Info("message sanitization applied")
+			h.businessLogger.Info("message sanitization applied")
 			transformedReqBody = sanitizedReq
 			reqCtx.transformedReqBody = sanitizedReq
 			if connInfo != nil {
@@ -332,7 +337,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 
 	proxyReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, upstreamURL, bytes.NewBuffer(transformedReqBody))
 	if err != nil {
-		h.logger.Error("failed to create proxy request", zap.Error(err))
+		h.businessLogger.Error("failed to create proxy request", zap.Error(err))
 		reqCtx.meta.Error = err.Error()
 		reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
 		h.updateConnectionStatus(connInfo, "error", reqCtx.meta.DurationMs)
@@ -393,7 +398,7 @@ func (h *Handler) transformRequestBody(body []byte, tags []string) ([]byte, []st
 			if h.injectMessage(req, injectText, t.Def.InjectFormat) {
 				transformed = true
 				appliedTransformers = append(appliedTransformers, t.Def.Name)
-				h.logger.Info("injected message", zap.String("transformer", t.Def.Name))
+				h.businessLogger.Info("injected message", zap.String("transformer", t.Def.Name))
 			}
 		}
 	}
@@ -430,7 +435,7 @@ func (h *Handler) transformRequestBody(body []byte, tags []string) ([]byte, []st
 		if err != nil {
 			return body, appliedTransformers
 		}
-		h.logger.Info("request messages transformed for upstream")
+		h.businessLogger.Info("request messages transformed for upstream")
 		return result, appliedTransformers
 	}
 
@@ -478,7 +483,7 @@ func (h *Handler) transformRequestBody(body []byte, tags []string) ([]byte, []st
 			req["tool_choice"] = map[string]interface{}{
 				"type": "auto",
 			}
-			h.logger.Info("added tool_choice hint for create_plan")
+			h.businessLogger.Info("added tool_choice hint for create_plan")
 		}
 	}
 
@@ -487,7 +492,7 @@ func (h *Handler) transformRequestBody(body []byte, tags []string) ([]byte, []st
 		return body, appliedTransformers
 	}
 
-	h.logger.Info("request tools transformed for upstream")
+	h.businessLogger.Info("request tools transformed for upstream")
 	return result, appliedTransformers
 }
 
@@ -780,7 +785,7 @@ func (h *Handler) shouldCompress(reqCtx *requestContext) *transformer.Transforme
 	}
 
 	// 使用压缩处理器的检测逻辑
-	compressor := transformer.NewCompressHandler(handler, h.logger, h.getGatewayMap())
+	compressor := transformer.NewCompressHandler(handler, h.businessLogger, h.getGatewayMap())
 	if compressor.ShouldCompress(reqCtx.reqBody, model) {
 		return handler
 	}
@@ -924,7 +929,7 @@ func (h *Handler) applyRequestHeaderInjections(proxyReq *http.Request, tags []st
 		for _, header := range def.HeaderInjections {
 			value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
 			proxyReq.Header.Set(header.Key, value)
-			h.logger.Info("injected request header",
+			h.businessLogger.Info("injected request header",
 				zap.String("transformer", def.Name),
 				zap.String("key", header.Key),
 				zap.String("value", value))
@@ -953,7 +958,7 @@ func (h *Handler) applyRequestHeaderInjections(proxyReq *http.Request, tags []st
 				for _, header := range def.HeaderInjections {
 					value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
 					proxyReq.Header.Set(header.Key, value)
-					h.logger.Info("injected request header",
+					h.businessLogger.Info("injected request header",
 						zap.String("transformer", def.Name),
 						zap.String("key", header.Key),
 						zap.String("value", value))
@@ -979,7 +984,7 @@ func (h *Handler) applyResponseHeaderInjections(c *gin.Context, tags []string, r
 		for _, header := range def.HeaderInjections {
 			value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
 			c.Header(header.Key, value)
-			h.logger.Info("injected response header",
+			h.businessLogger.Info("injected response header",
 				zap.String("transformer", def.Name),
 				zap.String("key", header.Key),
 				zap.String("value", value))
@@ -1008,7 +1013,7 @@ func (h *Handler) applyResponseHeaderInjections(c *gin.Context, tags []string, r
 				for _, header := range def.HeaderInjections {
 					value := h.replaceHeaderPlaceholders(header.Value, reqCtx)
 					c.Header(header.Key, value)
-					h.logger.Info("injected response header",
+					h.businessLogger.Info("injected response header",
 						zap.String("transformer", def.Name),
 						zap.String("key", header.Key),
 						zap.String("value", value))
@@ -1053,7 +1058,7 @@ func (h *Handler) replaceHeaderPlaceholders(value string, reqCtx *requestContext
 func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, reqCtx *requestContext, startTime time.Time) {
 	resp, err := h.httpClient.Do(proxyReq)
 	if err != nil {
-		h.logger.Error("upstream request failed", zap.Error(err))
+		h.businessLogger.Error("upstream request failed", zap.Error(err))
 		reqCtx.meta.Error = err.Error()
 		reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
 		reqCtx.forceLog = true // 请求失败，强制记录
@@ -1066,7 +1071,7 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		h.logger.Error("failed to read response body", zap.Error(err))
+		h.businessLogger.Error("failed to read response body", zap.Error(err))
 		reqCtx.meta.Error = err.Error()
 		reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
 		reqCtx.forceLog = true // 读取失败，强制记录
@@ -1158,7 +1163,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 
 	resp, err := client.Do(proxyReq)
 	if err != nil {
-		h.logger.Error("upstream streaming request failed", zap.Error(err))
+		h.businessLogger.Error("upstream streaming request failed", zap.Error(err))
 		reqCtx.meta.Error = err.Error()
 		reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
 		reqCtx.forceLog = true // 请求失败，强制记录
@@ -1311,7 +1316,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		h.logger.Error("streaming not supported")
+		h.businessLogger.Error("streaming not supported")
 		return
 	}
 
@@ -1359,7 +1364,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
-				h.logger.Error("error reading stream", zap.Error(err))
+				h.businessLogger.Error("error reading stream", zap.Error(err))
 				reqCtx.meta.Error = err.Error()
 			}
 			if accumulator != nil && accumulator.blockCount > 0 {
@@ -1504,14 +1509,14 @@ func (h *Handler) handleBlockStart(data string, toolBlocks map[int]*toolBlockSta
 		if blockType == "text" && len(contentReplacerDefs) > 0 {
 			var replacers []*transformer.ContentReplacer
 			for _, def := range contentReplacerDefs {
-				replacers = append(replacers, transformer.NewContentReplacer(def, h.logger))
+				replacers = append(replacers, transformer.NewContentReplacer(def, h.businessLogger))
 			}
 			textBlockReplacers[index] = replacers
 		}
 		if blockType == "text" && len(adRemoverDefs) > 0 {
 			var removers []*transformer.AdRemover
 			for _, def := range adRemoverDefs {
-				removers = append(removers, transformer.NewAdRemover(def, h.logger))
+				removers = append(removers, transformer.NewAdRemover(def, h.businessLogger))
 			}
 			textBlockAdRemovers[index] = removers
 		}
@@ -1923,7 +1928,7 @@ func (h *Handler) flushAccumulator(acc *toolBlockAccumulator, nextOutputIndex *i
 
 	stopData := fmt.Sprintf(`{"index":%d,"type":"content_block_stop"}`, outputIndex)
 
-	h.logger.Info("tool blocks merged and transformed",
+	h.businessLogger.Info("tool blocks merged and transformed",
 		zap.String("from", acc.toolName),
 		zap.String("to", targetToolName),
 		zap.Int("merged_blocks", acc.blockCount),
@@ -1959,7 +1964,7 @@ func (h *Handler) saveLog(reqCtx *requestContext) {
 
 	sessionDir := filepath.Join(h.logDir, "sessions", reqCtx.meta.SessionID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		h.logger.Error("failed to create session directory", zap.Error(err))
+		h.businessLogger.Error("failed to create session directory", zap.Error(err))
 		return
 	}
 
@@ -1967,19 +1972,19 @@ func (h *Handler) saveLog(reqCtx *requestContext) {
 
 	metaData, err := json.MarshalIndent(reqCtx.meta, "", "  ")
 	if err != nil {
-		h.logger.Error("failed to marshal meta", zap.Error(err))
+		h.businessLogger.Error("failed to marshal meta", zap.Error(err))
 		return
 	}
 	metaPath := filepath.Join(sessionDir, prefix+"_request.json")
 	if err := os.WriteFile(metaPath, metaData, 0644); err != nil {
-		h.logger.Error("failed to write meta file", zap.Error(err))
+		h.businessLogger.Error("failed to write meta file", zap.Error(err))
 		return
 	}
 
 	if len(reqCtx.reqBody) > 0 {
 		reqBodyPath := filepath.Join(sessionDir, prefix+"_request.body")
 		if err := os.WriteFile(reqBodyPath, reqCtx.reqBody, 0644); err != nil {
-			h.logger.Error("failed to write request body file", zap.Error(err))
+			h.businessLogger.Error("failed to write request body file", zap.Error(err))
 		}
 	}
 
@@ -1987,18 +1992,18 @@ func (h *Handler) saveLog(reqCtx *requestContext) {
 	if len(reqCtx.transformedReqBody) > 0 && !bytes.Equal(reqCtx.reqBody, reqCtx.transformedReqBody) {
 		transformedReqPath := filepath.Join(sessionDir, prefix+"_request_transformed.body")
 		if err := os.WriteFile(transformedReqPath, reqCtx.transformedReqBody, 0644); err != nil {
-			h.logger.Error("failed to write transformed request body file", zap.Error(err))
+			h.businessLogger.Error("failed to write transformed request body file", zap.Error(err))
 		}
 	}
 
 	if len(reqCtx.respBody) > 0 {
 		respBodyPath := filepath.Join(sessionDir, prefix+"_response.body")
 		if err := os.WriteFile(respBodyPath, reqCtx.respBody, 0644); err != nil {
-			h.logger.Error("failed to write response body file", zap.Error(err))
+			h.businessLogger.Error("failed to write response body file", zap.Error(err))
 		}
 	}
 
-	h.logger.Info("request logged",
+	h.businessLogger.Info("request logged",
 		zap.String("id", reqCtx.meta.ID),
 		zap.String("session_id", reqCtx.meta.SessionID),
 		zap.Int("sequence", reqCtx.meta.Sequence),
@@ -2019,7 +2024,7 @@ func (h *Handler) saveTransformedResponse(reqCtx *requestContext, transformedBod
 
 	transformedPath := filepath.Join(sessionDir, prefix+"_response_transformed.body")
 	if err := os.WriteFile(transformedPath, transformedBody, 0644); err != nil {
-		h.logger.Error("failed to write transformed response file", zap.Error(err))
+		h.businessLogger.Error("failed to write transformed response file", zap.Error(err))
 	}
 }
 
