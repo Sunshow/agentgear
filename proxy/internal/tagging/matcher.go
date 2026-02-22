@@ -106,6 +106,11 @@ func (e *Engine) Match(ctx *RequestContext) []string {
 			for _, tag := range rule.Tags {
 				tagSet[NormalizeTag(tag)] = true
 			}
+			if rule.DynamicTagsFunc != nil {
+				for _, tag := range rule.DynamicTagsFunc(ctx) {
+					tagSet[NormalizeTag(tag)] = true
+				}
+			}
 		}
 	}
 
@@ -119,6 +124,11 @@ func (e *Engine) Match(ctx *RequestContext) []string {
 		if e.matchRule(rule, ctx, tagSet) {
 			for _, tag := range rule.Tags {
 				tagSet[NormalizeTag(tag)] = true
+			}
+			if rule.DynamicTagsFunc != nil {
+				for _, tag := range rule.DynamicTagsFunc(ctx) {
+					tagSet[NormalizeTag(tag)] = true
+				}
 			}
 		}
 	}
@@ -428,6 +438,11 @@ func (e *Engine) TestMatch(ctx *RequestContext) map[string]interface{} {
 			for _, tag := range rule.Tags {
 				tagSet[NormalizeTag(tag)] = true
 			}
+			if rule.DynamicTagsFunc != nil {
+				for _, tag := range rule.DynamicTagsFunc(ctx) {
+					tagSet[NormalizeTag(tag)] = true
+				}
+			}
 		}
 	}
 
@@ -442,6 +457,11 @@ func (e *Engine) TestMatch(ctx *RequestContext) map[string]interface{} {
 			matchedRules = append(matchedRules, rule.Name)
 			for _, tag := range rule.Tags {
 				tagSet[NormalizeTag(tag)] = true
+			}
+			if rule.DynamicTagsFunc != nil {
+				for _, tag := range rule.DynamicTagsFunc(ctx) {
+					tagSet[NormalizeTag(tag)] = true
+				}
 			}
 		}
 	}

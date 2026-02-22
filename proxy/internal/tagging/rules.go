@@ -52,12 +52,13 @@ type Matcher struct {
 }
 
 type Rule struct {
-	Name     string    `mapstructure:"name" json:"name"`
-	Priority int       `mapstructure:"priority" json:"priority"`
-	Enabled  *bool     `mapstructure:"enabled" json:"enabled"`
-	Builtin  bool      `mapstructure:"-" json:"builtin"`
-	Matchers []Matcher `mapstructure:"matchers" json:"matchers"`
-	Tags     []string  `mapstructure:"tags" json:"tags"`
+	Name            string                              `mapstructure:"name" json:"name"`
+	Priority        int                                 `mapstructure:"priority" json:"priority"`
+	Enabled         *bool                               `mapstructure:"enabled" json:"enabled"`
+	Builtin         bool                                `mapstructure:"-" json:"builtin"`
+	Matchers        []Matcher                           `mapstructure:"matchers" json:"matchers"`
+	Tags            []string                            `mapstructure:"tags" json:"tags"`
+	DynamicTagsFunc func(ctx *RequestContext) []string  `mapstructure:"-" json:"-"`
 }
 
 func (r *Rule) IsEnabled() bool {
