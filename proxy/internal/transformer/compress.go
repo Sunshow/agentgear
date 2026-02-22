@@ -379,6 +379,7 @@ func (h *CompressHandler) CallCompressAPI(reqBody []byte, targetURL string, head
 		req.Header.Set(k, v)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-AgentGear-Compress-Request", "true") // 标记为内部压缩请求，防止代理死循环
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {

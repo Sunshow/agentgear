@@ -110,15 +110,16 @@ type ResponseMeta struct {
 }
 
 type requestContext struct {
-	meta                *RequestMeta
-	reqBody             []byte
-	transformedReqBody  []byte
-	respBody            []byte
-	tags                []string
-	connInfo            *memory.ConnectionInfo
-	forceLog            bool     // 强制记录日志（不受 logging.enabled 影响）
-	appliedTransformers []string // 收集应用的 transformers（包括响应方向）
-	isFirstTurn         bool     // true when request has only one user message
+	meta                 *RequestMeta
+	reqBody              []byte
+	transformedReqBody   []byte
+	respBody             []byte
+	tags                 []string
+	connInfo             *memory.ConnectionInfo
+	forceLog             bool     // 强制记录日志（不受 logging.enabled 影响）
+	appliedTransformers  []string // 收集应用的 transformers（包括响应方向）
+	isFirstTurn          bool     // true when request has only one user message
+	compressionAttempted bool     // 标记是否已尝试过压缩（防止死循环）
 }
 
 func (h *Handler) getOrCreateSession(c *gin.Context) (string, int) {
@@ -267,6 +268,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 
 	// 压缩处理：检测是否需要压缩上下文
 	if compressHandler := h.shouldCompress(reqCtx); compressHandler != nil {
+		reqCtx.compressionAttempted = true // 标记已尝试压缩，防止死循环
 		h.businessLogger.Info("compression triggered", zap.String("transformer", compressHandler.Name))
 		
 		// 构建压缩目标 URL
@@ -507,7 +509,9 @@ func (h *Handler) isCompressRequest(body []byte) bool {
 		lower := strings.ToLower(text)
 		return strings.Contains(lower, "produce a summary") ||
 			strings.Contains(lower, "summarize the following") ||
-			strings.Contains(lower, "create a summary")
+			strings.Contains(lower, "create a summary") ||
+			strings.Contains(lower, "summarizing conversation") ||
+			strings.Contains(lower, "specialized in summarizing")
 	}
 
 	// 字符串格式的 system
@@ -761,6 +765,18 @@ func (h *Handler) shouldPreemptContextError(reqCtx *requestContext) *transformer
 
 // shouldCompress 检测是否需要压缩上下文
 func (h *Handler) shouldCompress(reqCtx *requestContext) *transformer.TransformerDef {
+	// 防止同一请求内多次尝试压缩（死循环保护）
+	if reqCtx.compressionAttempted {
+		return nil
+	}
+
+	// 跳过来自内部压缩调用的请求（通过 header 标记识别）
+	if reqCtx.meta.Headers != nil {
+		if vals, ok := reqCtx.meta.Headers["X-Agentgear-Compress-Request"]; ok && len(vals) > 0 {
+			return nil
+		}
+	}
+
 	// 跳过压缩请求（避免死循环）
 	if h.isCompressRequest(reqCtx.reqBody) {
 		return nil
