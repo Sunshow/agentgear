@@ -405,6 +405,21 @@ func (h *Handler) transformRequestBody(body []byte, tags []string) ([]byte, []st
 		}
 	}
 
+	// Apply thinking inject transformer
+	if h.transformerRegistry != nil {
+		if thinkingDef := h.transformerRegistry.GetThinkingInjectTransformer(tags); thinkingDef != nil {
+			if injectedBody, applied := transformer.ApplyThinkingInject(body, h.businessLogger); applied {
+				body = injectedBody
+				// Re-parse req from modified body
+				if err := json.Unmarshal(body, &req); err != nil {
+					return body, appliedTransformers
+				}
+				transformed = true
+				appliedTransformers = append(appliedTransformers, thinkingDef.Name)
+			}
+		}
+	}
+
 	// Transform messages: replace "the ExitSpecMode tool" with "the create_documents tool" in system-reminder messages
 	if messages, ok := req["messages"].([]interface{}); ok {
 		for _, msg := range messages {

@@ -860,6 +860,29 @@ func (r *Registry) GetAdRemoverDefs(tags []string) []*TransformerDef {
 	return result
 }
 
+// GetThinkingInjectTransformer returns the first thinking_inject type transformer that matches the given tags
+func (r *Registry) GetThinkingInjectTransformer(tags []string) *TransformerDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
+			continue
+		}
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Type == "thinking_inject" && d.Direction == "request" {
+				return d
+			}
+		}
+	}
+	return nil
+}
+
 // GetCompressTransformer returns the first compress type transformer that matches the given tags
 func (r *Registry) GetCompressTransformer(tags []string) *TransformerDef {
 	r.mu.RLock()

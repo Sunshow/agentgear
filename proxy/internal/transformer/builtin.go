@@ -276,6 +276,15 @@ Read the complete conversation and generate a structured summary according to th
 		Direction:   "request",
 		Builtin:     true,
 	},
+
+	// === Thinking 模式注入转换器 ===
+	{
+		Name:        "$upstream_kiro_thinking_inject",
+		Description: "Kiro thinking mode: 检测 -thinking 后缀模型，注入思考提示词并去掉后缀",
+		Type:        "thinking_inject",
+		Direction:   "request",
+		Builtin:     true,
+	},
 }
 
 // BuiltinMappings defines built-in mapping rules
