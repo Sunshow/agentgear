@@ -58,9 +58,12 @@ func (h *CompressHandler) ShouldCompress(reqBody []byte, model string) bool {
 		return false
 	}
 
-	// Estimate tokens (排除图片 base64 数据)
+	// Extract messages portion only (exclude system, tools, metadata)
+	messagesBody := extractMessagesBytes(reqBody)
+
+	// Estimate tokens based on messages only (排除图片 base64 数据)
 	effectiveSize, imageCount := EstimateRequestSizeExcludingImages(
-		reqBody, h.def.ImageTokenEstimate, h.def.TokenEstimateRatio)
+		messagesBody, h.def.ImageTokenEstimate, h.def.TokenEstimateRatio)
 	estimatedTokens := int(float64(effectiveSize) / h.def.TokenEstimateRatio)
 	threshold := float64(tokenLimit) * h.def.ContextThresholdRatio
 
@@ -68,6 +71,7 @@ func (h *CompressHandler) ShouldCompress(reqBody []byte, model string) bool {
 		zap.Int("estimated_tokens", estimatedTokens),
 		zap.Int("image_count", imageCount),
 		zap.Int("original_size", len(reqBody)),
+		zap.Int("messages_size", len(messagesBody)),
 		zap.Int("effective_size", effectiveSize),
 		zap.Int("token_limit", tokenLimit),
 		zap.Float64("threshold_ratio", h.def.ContextThresholdRatio),
@@ -75,6 +79,26 @@ func (h *CompressHandler) ShouldCompress(reqBody []byte, model string) bool {
 		zap.Bool("should_compress", float64(estimatedTokens) > threshold))
 
 	return float64(estimatedTokens) > threshold
+}
+
+// extractMessagesBytes extracts the messages field from request body and returns its JSON bytes.
+// Falls back to the original body if extraction fails.
+func extractMessagesBytes(reqBody []byte) []byte {
+	var req map[string]interface{}
+	if err := json.Unmarshal(reqBody, &req); err != nil {
+		return reqBody
+	}
+	messages, ok := req["messages"]
+	if !ok {
+		return reqBody
+	}
+	// Wrap in a minimal request structure so EstimateRequestSizeExcludingImages can parse it
+	wrapper := map[string]interface{}{"messages": messages}
+	data, err := json.Marshal(wrapper)
+	if err != nil {
+		return reqBody
+	}
+	return data
 }
 
 // getContextTokenLimit returns the token limit for the given model
@@ -117,7 +141,13 @@ func (h *CompressHandler) estimateTokens(data []byte) int {
 func (h *CompressHandler) SelectAnchor(messages []Message) (prefix, suffix []Message, anchorIndex int) {
 	preserveBudget := h.def.PreserveBudget
 	if preserveBudget == 0 {
-		preserveBudget = 40000 // default
+		// Auto-derive from token limit: preserve half of the trigger threshold
+		if h.def.ContextTokenLimit > 0 && h.def.ContextThresholdRatio > 0 {
+			preserveBudget = int(float64(h.def.ContextTokenLimit) * h.def.ContextThresholdRatio * 0.5)
+		}
+		if preserveBudget == 0 {
+			preserveBudget = 40000 // fallback default
+		}
 	}
 
 	total := 0
@@ -172,7 +202,7 @@ func (h *CompressHandler) messageToString(msg Message) string {
 	return string(data)
 }
 
-// SanitizeToolMessages converts tool-call and tool-result to plain text
+// SanitizeToolMessages converts tool-call/tool_use and tool-result/tool_result to plain text
 func (h *CompressHandler) SanitizeToolMessages(messages []Message) []Message {
 	result := make([]Message, 0, len(messages))
 
@@ -183,9 +213,12 @@ func (h *CompressHandler) SanitizeToolMessages(messages []Message) []Message {
 			if blocks, ok := msg.Content.([]interface{}); ok {
 				for _, block := range blocks {
 					if blockMap, ok := block.(map[string]interface{}); ok {
-						if blockMap["type"] == "tool-result" {
+						blockType, _ := blockMap["type"].(string)
+						if blockType == "tool-result" || blockType == "tool_result" {
 							id := ""
 							if v, ok := blockMap["tool_call_id"].(string); ok {
+								id = v
+							} else if v, ok := blockMap["tool_use_id"].(string); ok {
 								id = v
 							}
 							name := "unknown"
@@ -193,6 +226,9 @@ func (h *CompressHandler) SanitizeToolMessages(messages []Message) []Message {
 								name = v
 							}
 							output := h.extractOutput(blockMap["output"])
+							if output == "" {
+								output = h.extractOutput(blockMap["content"])
+							}
 							texts = append(texts, fmt.Sprintf("[Tool Result%s %s: %s]",
 								func() string {
 									if id != "" {
@@ -211,22 +247,31 @@ func (h *CompressHandler) SanitizeToolMessages(messages []Message) []Message {
 			continue
 		}
 
-		// Handle assistant messages with tool-call/tool-result
+		// Handle assistant messages with tool-call/tool_use/thinking
 		if msg.Role == "assistant" {
 			if blocks, ok := msg.Content.([]interface{}); ok {
 				newBlocks := []interface{}{}
 				for _, block := range blocks {
 					if blockMap, ok := block.(map[string]interface{}); ok {
-						blockType := blockMap["type"]
+						blockType, _ := blockMap["type"].(string)
 
-						// tool-call -> text
-						if blockType == "tool-call" {
+						// thinking -> skip (not needed for compression)
+						if blockType == "thinking" {
+							continue
+						}
+
+						// tool-call / tool_use -> text
+						if blockType == "tool-call" || blockType == "tool_use" {
 							id := ""
 							if v, ok := blockMap["tool_call_id"].(string); ok {
+								id = v
+							} else if v, ok := blockMap["id"].(string); ok {
 								id = v
 							}
 							name := "unknown"
 							if v, ok := blockMap["tool_name"].(string); ok {
+								name = v
+							} else if v, ok := blockMap["name"].(string); ok {
 								name = v
 							}
 							input := h.safeStringify(blockMap["input"])
@@ -243,10 +288,12 @@ func (h *CompressHandler) SanitizeToolMessages(messages []Message) []Message {
 							continue
 						}
 
-						// tool-result -> text
-						if blockType == "tool-result" {
+						// tool-result / tool_result -> text
+						if blockType == "tool-result" || blockType == "tool_result" {
 							id := ""
 							if v, ok := blockMap["tool_call_id"].(string); ok {
+								id = v
+							} else if v, ok := blockMap["tool_use_id"].(string); ok {
 								id = v
 							}
 							name := "unknown"
@@ -254,6 +301,9 @@ func (h *CompressHandler) SanitizeToolMessages(messages []Message) []Message {
 								name = v
 							}
 							output := h.extractOutput(blockMap["output"])
+							if output == "" {
+								output = h.extractOutput(blockMap["content"])
+							}
 							newBlocks = append(newBlocks, map[string]interface{}{
 								"type": "text",
 								"text": fmt.Sprintf("[Tool Result%s %s: %s]",
@@ -263,6 +313,48 @@ func (h *CompressHandler) SanitizeToolMessages(messages []Message) []Message {
 										}
 										return ""
 									}(), name, output),
+							})
+							continue
+						}
+
+						newBlocks = append(newBlocks, block)
+					} else {
+						newBlocks = append(newBlocks, block)
+					}
+				}
+				result = append(result, Message{
+					Role:    msg.Role,
+					Content: newBlocks,
+				})
+				continue
+			}
+		}
+
+		// Handle user messages with tool_result blocks
+		if msg.Role == "user" {
+			if blocks, ok := msg.Content.([]interface{}); ok {
+				newBlocks := []interface{}{}
+				for _, block := range blocks {
+					if blockMap, ok := block.(map[string]interface{}); ok {
+						blockType, _ := blockMap["type"].(string)
+
+						if blockType == "tool_result" || blockType == "tool-result" {
+							id := ""
+							if v, ok := blockMap["tool_use_id"].(string); ok {
+								id = v
+							} else if v, ok := blockMap["tool_call_id"].(string); ok {
+								id = v
+							}
+							output := h.extractOutput(blockMap["content"])
+							newBlocks = append(newBlocks, map[string]interface{}{
+								"type": "text",
+								"text": fmt.Sprintf("[Tool Result%s: %s]",
+									func() string {
+										if id != "" {
+											return " (" + id + ")"
+										}
+										return ""
+									}(), output),
 							})
 							continue
 						}
@@ -352,12 +444,19 @@ func (h *CompressHandler) BuildCompressRequest(prefix []Message, originalModel s
 		model = originalModel // Use original model if not specified
 	}
 
+	// Determine max tokens
+	maxTokens := h.def.CompressMaxTokens
+	if maxTokens == 0 {
+		maxTokens = 4096
+	}
+
 	// Build request
 	req := map[string]interface{}{
 		"model":      model,
 		"system":     systemPrompt,
 		"messages":   messages,
-		"max_tokens": 4096,
+		"max_tokens": maxTokens,
+		"stream":     false,
 	}
 
 	return json.Marshal(req)
@@ -393,18 +492,25 @@ func (h *CompressHandler) CallCompressAPI(reqBody []byte, targetURL string, head
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		h.logger.Error("compress API error response",
+			zap.Int("status", resp.StatusCode),
+			zap.String("body", string(body)))
 		return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response
 	var result map[string]interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
+		h.logger.Error("compress API response parse failed",
+			zap.String("body", string(body)))
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	// Extract summary from content
 	content, ok := result["content"].([]interface{})
 	if !ok || len(content) == 0 {
+		h.logger.Error("compress API no content in response",
+			zap.String("body", string(body)))
 		return "", fmt.Errorf("no content in response")
 	}
 

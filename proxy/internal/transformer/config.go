@@ -72,6 +72,7 @@ type TransformerDef struct {
 	// compress 类型专用字段
 	CompressTarget       string `mapstructure:"compress_target" json:"compress_target,omitempty" yaml:"compress_target,omitempty"`             // "same" | "gateway:name" | "url:https://..."
 	CompressModel        string `mapstructure:"compress_model" json:"compress_model,omitempty" yaml:"compress_model,omitempty"`                // 压缩使用的模型
+	CompressMaxTokens    int    `mapstructure:"compress_max_tokens" json:"compress_max_tokens,omitempty" yaml:"compress_max_tokens,omitempty"` // 压缩请求的 max_tokens
 	CompressSystemPrompt string `mapstructure:"compress_system_prompt" json:"compress_system_prompt,omitempty" yaml:"compress_system_prompt,omitempty"` // 压缩 system prompt
 	CompressUserPrompt   string `mapstructure:"compress_user_prompt" json:"compress_user_prompt,omitempty" yaml:"compress_user_prompt,omitempty"`       // 压缩 user prompt
 	PreserveBudget       int    `mapstructure:"preserve_budget" json:"preserve_budget,omitempty" yaml:"preserve_budget,omitempty"`             // 保留最近 N tokens

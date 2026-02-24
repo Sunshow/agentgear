@@ -279,11 +279,21 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 			// 创建压缩处理器
 			compressor := transformer.NewCompressHandler(compressHandler, h.businessLogger, h.getGatewayMap())
 			
-			// 准备请求头（复制认证信息）
+			// 准备请求头（复制原始请求头，排除不应转发的）
 			compressHeaders := make(map[string]string)
-			for _, key := range []string{"Authorization", "X-Api-Key", "Anthropic-Api-Key"} {
-				if val := c.GetHeader(key); val != "" {
-					compressHeaders[key] = val
+			skipHeaders := map[string]bool{
+				"Content-Length":    true,
+				"Host":             true,
+				"Accept-Encoding":  true,
+				"Connection":       true,
+				"Transfer-Encoding": true,
+			}
+			for key, values := range c.Request.Header {
+				if skipHeaders[http.CanonicalHeaderKey(key)] {
+					continue
+				}
+				if len(values) > 0 {
+					compressHeaders[key] = values[0]
 				}
 			}
 			
