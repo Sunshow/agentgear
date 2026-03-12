@@ -2122,10 +2122,10 @@ func decompressIfNeeded(body []byte, headers http.Header) []byte {
 }
 
 // shouldForceLog 检查是否需要强制记录日志（不受 logging.enabled 影响）
-// 条件：响应状态码非 200，或响应状态码 200 但响应体为空，或流式响应无内容块
+// 条件：响应状态码 400，或响应状态码 200 但响应体为空，或流式响应无内容块
 func (h *Handler) shouldForceLog(respStatus int, respBodyLen int, hasEmptyContent bool) bool {
-	// 非 200 响应
-	if respStatus != http.StatusOK {
+	// 400 响应强制记录（其他非 2xx 不再强制记录，避免磁盘暴涨）
+	if respStatus == http.StatusBadRequest {
 		return true
 	}
 	// 200 响应但 body 为空
