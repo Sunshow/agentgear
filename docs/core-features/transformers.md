@@ -131,7 +131,7 @@ transformers:
 对响应中的 `usage` 对象执行以下操作：
 
 ```
-input_tokens = input_tokens + cache_read_input_tokens
+input_tokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens
 cache_creation_input_tokens = 0
 cache_read_input_tokens = 0
 ```

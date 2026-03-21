@@ -11,20 +11,23 @@ import (
 // Returns true if any modification was made.
 func stripCacheFromUsage(usage map[string]interface{}, logger *zap.Logger) bool {
 	cacheRead, hasRead := usage["cache_read_input_tokens"].(float64)
-	_, hasCreation := usage["cache_creation_input_tokens"].(float64)
+	cacheCreation, hasCreation := usage["cache_creation_input_tokens"].(float64)
 
 	if !hasRead && !hasCreation {
 		return false
 	}
 
-	if hasRead && cacheRead > 0 {
-		inputTokens, _ := usage["input_tokens"].(float64)
-		usage["input_tokens"] = inputTokens + cacheRead
+	inputTokens, _ := usage["input_tokens"].(float64)
+	newInput := inputTokens + cacheRead + cacheCreation
+
+	if newInput != inputTokens {
+		usage["input_tokens"] = newInput
 		if logger != nil {
-			logger.Info("cache_strip: merged cache_read_input_tokens into input_tokens",
+			logger.Info("cache_strip: merged cache tokens into input_tokens",
 				zap.Float64("cache_read", cacheRead),
+				zap.Float64("cache_creation", cacheCreation),
 				zap.Float64("original_input", inputTokens),
-				zap.Float64("new_input", inputTokens+cacheRead))
+				zap.Float64("new_input", newInput))
 		}
 	}
 

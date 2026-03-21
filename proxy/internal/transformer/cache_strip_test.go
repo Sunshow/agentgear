@@ -22,7 +22,7 @@ func TestStripCacheFromMessageStart(t *testing.T) {
 			name:           "strip cache tokens",
 			input:          `{"message":{"usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":200,"cache_read_input_tokens":300}}}`,
 			wantModified:   true,
-			wantInput:      400,
+			wantInput:      600,
 			wantCacheRead:  0,
 			wantCacheCreate: 0,
 		},
@@ -35,7 +35,7 @@ func TestStripCacheFromMessageStart(t *testing.T) {
 			name:           "only cache_creation",
 			input:          `{"message":{"usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":200}}}`,
 			wantModified:   true,
-			wantInput:      100,
+			wantInput:      300,
 			wantCacheRead:  0,
 			wantCacheCreate: 0,
 		},
@@ -101,8 +101,8 @@ func TestStripCacheFromMessageDelta(t *testing.T) {
 		t.Fatalf("failed to parse result: %v", err)
 	}
 	usage := payload["usage"].(map[string]interface{})
-	if got := usage["input_tokens"].(float64); got != 250 {
-		t.Errorf("input_tokens = %v, want 250", got)
+	if got := usage["input_tokens"].(float64); got != 300 {
+		t.Errorf("input_tokens = %v, want 300", got)
 	}
 	if got := usage["cache_read_input_tokens"].(float64); got != 0 {
 		t.Errorf("cache_read_input_tokens = %v, want 0", got)
@@ -126,8 +126,8 @@ func TestStripCacheFromResponse(t *testing.T) {
 		t.Fatalf("failed to parse result: %v", err)
 	}
 	usage := payload["usage"].(map[string]interface{})
-	if got := usage["input_tokens"].(float64); got != 1800 {
-		t.Errorf("input_tokens = %v, want 1800", got)
+	if got := usage["input_tokens"].(float64); got != 2300 {
+		t.Errorf("input_tokens = %v, want 2300", got)
 	}
 	if got := usage["cache_read_input_tokens"].(float64); got != 0 {
 		t.Errorf("cache_read_input_tokens = %v, want 0", got)
