@@ -1175,6 +1175,17 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 	// Apply response header injections
 	h.applyResponseHeaderInjections(c, reqCtx.tags, reqCtx)
 
+	// Apply cache strip transformer for non-streaming response
+	if h.transformerRegistry != nil {
+		if cacheStripDef := h.transformerRegistry.GetCacheStripTransformer(reqCtx.tags); cacheStripDef != nil {
+			if stripped, modified := transformer.StripCacheFromResponse(respBody, h.businessLogger); modified {
+				respBody = stripped
+				h.businessLogger.Info("cache_strip applied to non-streaming response", zap.String("transformer", cacheStripDef.Name))
+				reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, cacheStripDef.Name)
+			}
+		}
+	}
+
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 }
 
@@ -1382,6 +1393,12 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 	}
 	textBlockAdRemovers := make(map[int][]*transformer.AdRemover)
 
+	// Initialize cache strip transformer
+	var cacheStripDef *transformer.TransformerDef
+	if h.transformerRegistry != nil {
+		cacheStripDef = h.transformerRegistry.GetCacheStripTransformer(reqCtx.tags)
+	}
+
 	writeEvents := func(events []sseEvent) {
 		for _, evt := range events {
 			outLine := fmt.Sprintf("event: %s\ndata: %s\n\n", evt.eventType, evt.data)
@@ -1396,7 +1413,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		if firstEvent.eventType == "content_block_start" {
 			hasContentBlock = true
 		}
-		outputEvents := h.processSSEEvent(firstEvent.eventType, firstEvent.data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers)
+		outputEvents := h.processSSEEvent(firstEvent.eventType, firstEvent.data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers, cacheStripDef)
 		writeEvents(outputEvents)
 	}
 
@@ -1432,7 +1449,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 					hasContentBlock = true
 				}
 
-				outputEvents := h.processSSEEvent(eventType, data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers)
+				outputEvents := h.processSSEEvent(eventType, data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers, cacheStripDef)
 				writeEvents(outputEvents)
 			}
 			_, _ = reader.ReadString('\n')
@@ -1489,8 +1506,19 @@ type sseEvent struct {
 	data      string
 }
 
-func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, pendingMessageDelta **sseEvent, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext, contentReplacerDefs []*transformer.TransformerDef, textBlockReplacers map[int][]*transformer.ContentReplacer, adRemoverDefs []*transformer.TransformerDef, textBlockAdRemovers map[int][]*transformer.AdRemover) []sseEvent {
+func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, pendingMessageDelta **sseEvent, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext, contentReplacerDefs []*transformer.TransformerDef, textBlockReplacers map[int][]*transformer.ContentReplacer, adRemoverDefs []*transformer.TransformerDef, textBlockAdRemovers map[int][]*transformer.AdRemover, cacheStripDef *transformer.TransformerDef) []sseEvent {
 	switch eventType {
+	case "message_start":
+		if cacheStripDef != nil {
+			if stripped, modified := transformer.StripCacheFromMessageStart(data, h.businessLogger); modified {
+				data = stripped
+				h.businessLogger.Info("cache_strip applied to message_start", zap.String("transformer", cacheStripDef.Name))
+				if reqCtx != nil {
+					reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, cacheStripDef.Name)
+				}
+			}
+		}
+		return []sseEvent{{eventType: eventType, data: data}}
 	case "content_block_start":
 		return h.handleBlockStart(data, toolBlocks, nextOutputIndex, accumulator, writeEvents, tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers)
 	case "content_block_delta":
@@ -1498,6 +1526,11 @@ func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*to
 	case "content_block_stop":
 		return h.handleBlockStop(data, toolBlocks, accumulator, nextOutputIndex, tags, reqCtx, textBlockReplacers, textBlockAdRemovers)
 	case "message_delta":
+		if cacheStripDef != nil {
+			if stripped, modified := transformer.StripCacheFromMessageDelta(data, h.businessLogger); modified {
+				data = stripped
+			}
+		}
 		// Cache message_delta, send it before message_stop
 		*pendingMessageDelta = &sseEvent{eventType: eventType, data: data}
 		return nil

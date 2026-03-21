@@ -122,6 +122,41 @@ transformers:
 - `$droid_upstream_kiro_force_compress`：Droid + Kiro 场景，70% 阈值，200K token 限制
 - 对应 mapping：`$droid_upstream_kiro_force_compress_mapping`（tags: `$a_droid` + `$u_kiro`）
 
+## cache_strip 类型：缓存 Token 擦除
+
+用于擦除 Anthropic 协议响应中的缓存 token 计数，将缓存读取的 token 数量合并到输入 token 中。适用于不希望下游 Agent 感知到缓存命中情况的场景。
+
+### 转换逻辑
+
+对响应中的 `usage` 对象执行以下操作：
+
+```
+input_tokens = input_tokens + cache_read_input_tokens
+cache_creation_input_tokens = 0
+cache_read_input_tokens = 0
+```
+
+### 作用范围
+
+- 流式响应：`message_start` 事件中的 `message.usage` 和 `message_delta` 事件中的 `usage`
+- 非流式响应：响应体顶层 `usage` 字段
+
+### 配置示例
+
+```yaml
+transformers:
+  definitions:
+    - name: "my_cache_strip"
+      type: "cache_strip"
+      direction: "response"
+
+  mappings:
+    - name: "my_cache_strip_mapping"
+      enabled: true
+      tags: ["$a_droid"]
+      transformer: "my_cache_strip"
+```
+
 ## 详细设计文档
 
 - [模板化转换器设计](../模板化转换器设计.md) - 转换器模板化设计方案
