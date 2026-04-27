@@ -1309,71 +1309,14 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		return
 	}
 
-	// === 只读取第一个事件进行检测 ===
+	// === 流式响应：直接 passthrough，不再做预读检测 ===
+	// 之前的 "读取第一个事件做 isEmptyMessageStart 检测" 会在上游 thinking 阶段
+	// 阻塞首字节输出，导致客户端长时间卡在 thinking 阶段。
+	// 现在改为：流处理过程中通过 hasContentBlock + emptyMessageStartSeen 跟踪状态，
+	// 流结束后若仍未收到任何 content block 且首事件为空 message_start，则强制日志记录。
 	var originalBuffer bytes.Buffer
 	teeReader := io.TeeReader(resp.Body, &originalBuffer)
 	reader := bufio.NewReader(teeReader)
-
-	// 读取第一个事件
-	type rawEvent struct {
-		eventType string
-		data      string
-	}
-	var firstEvent *rawEvent
-
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		line = strings.TrimSuffix(line, "\n")
-
-		if strings.HasPrefix(line, "event: ") {
-			eventType := strings.TrimPrefix(line, "event: ")
-			dataLine, err := reader.ReadString('\n')
-			if err != nil && err != io.EOF {
-				break
-			}
-			dataLine = strings.TrimSuffix(dataLine, "\n")
-
-			if strings.HasPrefix(dataLine, "data: ") {
-				data := strings.TrimPrefix(dataLine, "data: ")
-				firstEvent = &rawEvent{eventType: eventType, data: data}
-				// 读取空行分隔符
-				_, _ = reader.ReadString('\n')
-				break
-			}
-		}
-	}
-
-	// === 检测 message_start 事件中的空内容 ===
-	isEmptyContent := false
-	if firstEvent != nil && firstEvent.eventType == "message_start" {
-		isEmptyContent = h.isEmptyMessageStart(firstEvent.data)
-	}
-
-	// 如果是空内容且满足转换条件，返回上下文超限错误
-	if isEmptyContent {
-		if handler := h.shouldTransformEmptyStreamToContextError(reqCtx); handler != nil {
-			// 读取剩余内容用于日志
-			remaining, _ := io.ReadAll(reader)
-			originalBuffer.Write(remaining)
-
-			reqCtx.meta.Response = &ResponseMeta{
-				Status:  resp.StatusCode,
-				Headers: sanitizeHeaders(resp.Header),
-			}
-			reqCtx.respBody = originalBuffer.Bytes()
-			reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
-			reqCtx.forceLog = true
-			h.updateConnectionStatus(reqCtx.connInfo, "error_transformed", reqCtx.meta.DurationMs)
-			h.saveLog(reqCtx)
-			log.Printf("[ERROR_TRANSFORM] Empty stream response (message_start with empty content): transformer=%s request_size=%d",
-				handler.Name, len(reqCtx.reqBody))
-			h.writeContextLengthError(c, handler, len(reqCtx.reqBody))
-			return
-		}
-	}
 
 	// === 正常流式处理：设置响应头 ===
 	for key, values := range resp.Header {
@@ -1432,16 +1375,11 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		}
 	}
 
-	// 先处理已读取的第一个事件
-	if firstEvent != nil {
-		if firstEvent.eventType == "content_block_start" {
-			hasContentBlock = true
-		}
-		outputEvents := h.processSSEEvent(firstEvent.eventType, firstEvent.data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers, cacheStripDef)
-		writeEvents(outputEvents)
-	}
+	// 跟踪首个 message_start 是否为空内容（用于流末判定 forceLog / 错误转换降级）
+	emptyMessageStartSeen := false
+	firstEventProcessed := false
 
-	// 继续实时处理剩余事件
+	// 实时处理上游事件流
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -1473,6 +1411,14 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 					hasContentBlock = true
 				}
 
+				// 检测首个 message_start 是否为空内容（仅作记录，不阻塞流）
+				if !firstEventProcessed {
+					firstEventProcessed = true
+					if eventType == "message_start" && h.isEmptyMessageStart(data) {
+						emptyMessageStartSeen = true
+					}
+				}
+
 				outputEvents := h.processSSEEvent(eventType, data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers, cacheStripDef)
 				writeEvents(outputEvents)
 			}
@@ -1494,7 +1440,8 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 	reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
 
 	// 设置强制记录标记（非200响应或200但body为空或流式响应无内容块）
-	reqCtx.forceLog = h.shouldForceLog(resp.StatusCode, originalBuffer.Len(), !hasContentBlock)
+	// 若首事件 message_start 为空内容且最终也未产生 content block，强制记录用于后续分析
+	reqCtx.forceLog = h.shouldForceLog(resp.StatusCode, originalBuffer.Len(), !hasContentBlock || (emptyMessageStartSeen && !hasContentBlock))
 
 	// Update memory store
 	if reqCtx.connInfo != nil && h.memoryStore != nil {
