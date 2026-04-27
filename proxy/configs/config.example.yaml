@@ -48,6 +48,17 @@ gateways:
   #   timeout: 600
   #   enabled: true
 
+  # Example: DeepSeek API gateway (Anthropic-compatible protocol)
+  # DeepSeek supports extended thinking with signatures.
+  # The builtin thinking_preserve transformer automatically caches and
+  # re-injects thinking blocks that downstream agents may drop.
+  # - name: "deepseek"
+  #   path: "/deepseek"
+  #   upstream: "https://api.deepseek.com"
+  #   type: ""
+  #   timeout: 600
+  #   enabled: true
+
 # -----------------------------------------------------------------------------
 # Logging Configuration
 # -----------------------------------------------------------------------------
@@ -364,6 +375,26 @@ transformers:
     #   summary_budget: 4000
     #   auto_retry: true
     #   max_retries: 1
+
+    # === Type: thinking_preserve (Thinking Blocks 保留) ===
+    # Automatically caches thinking blocks from upstream responses and re-injects
+    # them into requests when downstream agents drop empty thinking blocks.
+    # This prevents 400 errors from upstreams that require thinking signatures.
+    #
+    # The builtin $preserve_thinking_blocks is enabled by default for all requests.
+    # No configuration needed unless you want to customize behavior.
+    #
+    # How it works:
+    # 1. Response: After streaming completes, extracts thinking blocks and caches
+    #    them keyed by SHA256 hash of non-thinking content blocks
+    # 2. Request: Scans assistant messages, finds missing thinking blocks via hash
+    #    lookup, and injects cached thinking blocks at the beginning of content
+    #
+    # To disable, override the builtin mapping:
+    # - name: "$preserve_thinking_blocks_mapping"
+    #   enabled: false
+    #   tags: []
+    #   transformer: "$preserve_thinking_blocks"
 
   # Mapping rules (bind transformers to conditions)
   mappings:

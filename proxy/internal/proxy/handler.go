@@ -40,9 +40,11 @@ type Handler struct {
 	sessionSequences    sync.Map
 	toolMapper          *transformer.ToolMapper
 	memoryStore         *memory.ConnectionStore
+	thinkingStore       *memory.ThinkingStore
 	taggingEngine       *tagging.Engine
 	transformerRegistry *transformer.Registry
 	wsHub               *api.WSHub
+	thinkingPreserver   *transformer.ThinkingPreserver
 }
 
 type Config struct {
@@ -55,6 +57,7 @@ type Config struct {
 	LogDir              string
 	LogEnabled          bool
 	MemoryStore         *memory.ConnectionStore
+	ThinkingStore       *memory.ThinkingStore
 	TaggingEngine       *tagging.Engine
 	TransformerRegistry *transformer.Registry
 	WSHub               *api.WSHub
@@ -77,6 +80,7 @@ func NewHandler(cfg Config) *Handler {
 		logEnabled:          cfg.LogEnabled,
 		httpClient:          &http.Client{Timeout: cfg.Timeout},
 		memoryStore:         cfg.MemoryStore,
+		thinkingStore:       cfg.ThinkingStore,
 		taggingEngine:       cfg.TaggingEngine,
 		transformerRegistry: cfg.TransformerRegistry,
 		wsHub:               cfg.WSHub,
@@ -86,6 +90,11 @@ func NewHandler(cfg Config) *Handler {
 		h.toolMapper = transformer.NewToolMapperWithConfig(cfg.TransformerRegistry.GetConfig())
 	} else {
 		h.toolMapper = transformer.NewToolMapper()
+	}
+
+	// Initialize thinking preserver if store is available
+	if cfg.ThinkingStore != nil {
+		h.thinkingPreserver = transformer.NewThinkingPreserver(cfg.ThinkingStore, businessLogger)
 	}
 
 	return h
@@ -270,7 +279,7 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 	if compressHandler := h.shouldCompress(reqCtx); compressHandler != nil {
 		reqCtx.compressionAttempted = true // 标记已尝试压缩，防止死循环
 		h.businessLogger.Info("compression triggered", zap.String("transformer", compressHandler.Name))
-		
+
 		// 构建压缩目标 URL
 		compressURL, err := h.buildCompressTargetURL(compressHandler)
 		if err != nil {
@@ -278,14 +287,14 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 		} else {
 			// 创建压缩处理器
 			compressor := transformer.NewCompressHandler(compressHandler, h.businessLogger, h.getGatewayMap())
-			
+
 			// 准备请求头（复制原始请求头，排除不应转发的）
 			compressHeaders := make(map[string]string)
 			skipHeaders := map[string]bool{
 				"Content-Length":    true,
-				"Host":             true,
-				"Accept-Encoding":  true,
-				"Connection":       true,
+				"Host":              true,
+				"Accept-Encoding":   true,
+				"Connection":        true,
 				"Transfer-Encoding": true,
 			}
 			for key, values := range c.Request.Header {
@@ -296,25 +305,40 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 					compressHeaders[key] = values[0]
 				}
 			}
-			
+
 			// 执行压缩
 			compressedReq, compressed, err := compressor.Process(transformedReqBody, compressURL, compressHeaders)
 			if err != nil {
 				h.businessLogger.Error("compression failed", zap.Error(err))
 				// 压缩失败，继续使用原请求（降级处理）
 			} else if compressed {
-				h.businessLogger.Info("compression succeeded", 
+				h.businessLogger.Info("compression succeeded",
 					zap.Int("original_size", len(transformedReqBody)),
 					zap.Int("compressed_size", len(compressedReq)))
 				transformedReqBody = compressedReq
 				reqCtx.transformedReqBody = compressedReq
 				reqCtx.forceLog = true
-				
+
 				// 更新连接信息
 				if connInfo != nil {
 					connInfo.TransformedRequest = true
 					connInfo.TransformedRequestBody = compressedReq
 					connInfo.AppliedRequestTransformers = append(connInfo.AppliedRequestTransformers, "compress:"+compressHandler.Name)
+				}
+			}
+		}
+	}
+
+	// Thinking preserve: 注入缺失的 thinking blocks（在消息格式修正之前）
+	if h.thinkingPreserver != nil && h.transformerRegistry != nil {
+		if def := h.transformerRegistry.GetThinkingPreserveTransformer(reqCtx.tags); def != nil {
+			if injectedReq, injected := h.thinkingPreserver.InjectIntoRequest(transformedReqBody); injected {
+				transformedReqBody = injectedReq
+				reqCtx.transformedReqBody = injectedReq
+				if connInfo != nil {
+					connInfo.TransformedRequest = true
+					connInfo.TransformedRequestBody = injectedReq
+					connInfo.AppliedRequestTransformers = append(connInfo.AppliedRequestTransformers, "thinking_preserve:"+def.Name)
 				}
 			}
 		}
@@ -1495,10 +1519,159 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 
 	h.saveLog(reqCtx)
 
+	// Thinking preserve: cache thinking blocks from response
+	if h.thinkingPreserver != nil && h.transformerRegistry != nil && resp.StatusCode == 200 {
+		if def := h.transformerRegistry.GetThinkingPreserveTransformer(reqCtx.tags); def != nil {
+			h.cacheThinkingBlocksFromSSE(originalBuffer.Bytes())
+		}
+	}
+
 	// Always save transformed response for debugging
 	if transformedBuffer.Len() > 0 {
 		h.saveTransformedResponse(reqCtx, transformedBuffer.Bytes())
 	}
+}
+
+// cacheThinkingBlocksFromSSE parses SSE response buffer to extract and cache thinking blocks
+func (h *Handler) cacheThinkingBlocksFromSSE(sseData []byte) {
+	// Track content blocks by index
+	type blockInfo struct {
+		blockType string
+		thinking  string
+		signature string
+		// For non-thinking blocks, store the raw content_block
+		rawBlock map[string]interface{}
+	}
+
+	blocks := make(map[int]*blockInfo)
+
+	lines := strings.Split(string(sseData), "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			continue
+		}
+
+		eventType, _ := payload["type"].(string)
+		indexFloat, ok := payload["index"].(float64)
+		if !ok && eventType != "message_start" && eventType != "message_delta" && eventType != "message_stop" {
+			continue
+		}
+		index := int(indexFloat)
+
+		switch eventType {
+		case "content_block_start":
+			cb, ok := payload["content_block"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			bt, _ := cb["type"].(string)
+			bi := &blockInfo{blockType: bt}
+			if bt == "thinking" {
+				bi.thinking, _ = cb["thinking"].(string)
+				bi.signature, _ = cb["signature"].(string)
+			} else {
+				bi.rawBlock = cb
+			}
+			blocks[index] = bi
+
+		case "content_block_delta":
+			bi := blocks[index]
+			if bi == nil {
+				continue
+			}
+			delta, ok := payload["delta"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			deltaType, _ := delta["type"].(string)
+			switch deltaType {
+			case "thinking_delta":
+				if t, ok := delta["thinking"].(string); ok {
+					bi.thinking += t
+				}
+			case "signature_delta":
+				if s, ok := delta["signature"].(string); ok {
+					bi.signature += s
+				}
+			case "input_json_delta":
+				// Accumulate tool input for hash matching
+				if bi.rawBlock != nil {
+					prev, _ := bi.rawBlock["_input_json"].(string)
+					partial, _ := delta["partial_json"].(string)
+					bi.rawBlock["_input_json"] = prev + partial
+				}
+			}
+		}
+	}
+
+	// Build content block list and extract thinking blocks
+	var thinkingBlocks []map[string]interface{}
+	var nonThinkingBlocks []map[string]interface{}
+
+	// Process blocks in order
+	maxIndex := -1
+	for idx := range blocks {
+		if idx > maxIndex {
+			maxIndex = idx
+		}
+	}
+
+	for idx := 0; idx <= maxIndex; idx++ {
+		bi := blocks[idx]
+		if bi == nil {
+			continue
+		}
+		if bi.blockType == "thinking" {
+			if bi.signature != "" {
+				thinkingBlocks = append(thinkingBlocks, map[string]interface{}{
+					"type":      "thinking",
+					"thinking":  bi.thinking,
+					"signature": bi.signature,
+				})
+			}
+		} else {
+			block := bi.rawBlock
+			if block == nil {
+				block = map[string]interface{}{"type": bi.blockType}
+			}
+			// Reconstruct tool_use input from accumulated JSON
+			if bi.blockType == "tool_use" {
+				if inputJSON, ok := block["_input_json"].(string); ok && inputJSON != "" {
+					var input interface{}
+					if err := json.Unmarshal([]byte(inputJSON), &input); err == nil {
+						block["input"] = input
+					}
+					delete(block, "_input_json")
+				}
+			}
+			nonThinkingBlocks = append(nonThinkingBlocks, block)
+		}
+	}
+
+	if len(thinkingBlocks) == 0 || len(nonThinkingBlocks) == 0 {
+		h.businessLogger.Debug("thinking_preserve: SSE response has no cacheable thinking blocks",
+			zap.Int("thinking_blocks", len(thinkingBlocks)),
+			zap.Int("non_thinking_blocks", len(nonThinkingBlocks)),
+			zap.Int("total_blocks", len(blocks)))
+		return
+	}
+
+	h.businessLogger.Info("thinking_preserve: parsed SSE response for caching",
+		zap.Int("thinking_blocks", len(thinkingBlocks)),
+		zap.Int("non_thinking_blocks", len(nonThinkingBlocks)))
+
+	// Combine all blocks and pass to CacheFromResponse which handles hash + storage
+	allBlocks := make([]map[string]interface{}, 0, len(thinkingBlocks)+len(nonThinkingBlocks))
+	allBlocks = append(allBlocks, thinkingBlocks...)
+	allBlocks = append(allBlocks, nonThinkingBlocks...)
+	h.thinkingPreserver.CacheFromResponse(allBlocks)
 }
 
 type sseEvent struct {

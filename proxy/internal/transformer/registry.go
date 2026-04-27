@@ -883,6 +883,29 @@ func (r *Registry) GetThinkingInjectTransformer(tags []string) *TransformerDef {
 	return nil
 }
 
+// GetThinkingPreserveTransformer returns the first thinking_preserve type transformer that matches the given tags
+func (r *Registry) GetThinkingPreserveTransformer(tags []string) *TransformerDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
+			continue
+		}
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Type == "thinking_preserve" {
+				return d
+			}
+		}
+	}
+	return nil
+}
+
 // GetCacheStripTransformer returns the first cache_strip type transformer that matches the given tags
 func (r *Registry) GetCacheStripTransformer(tags []string) *TransformerDef {
 	r.mu.RLock()

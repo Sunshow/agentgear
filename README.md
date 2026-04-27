@@ -18,6 +18,7 @@ AgentGear 作为中间代理层，提供：
 4. **标签系统** - 根据请求特征自动打标签
 5. **工具转换** - 基于标签的配置化转换
 6. **流式支持** - SSE 流式响应处理和转换
+7. **Thinking 保留** - 自动缓存并补全被 Agent 丢弃的 thinking blocks，防止上游 400 错误
 
 ## 项目结构
 
@@ -60,6 +61,13 @@ gateways:
     upstream: "https://api.anthropic.com"
     timeout: 300
     enabled: true
+
+  # DeepSeek API (Anthropic-compatible, supports extended thinking)
+  # - name: "deepseek"
+  #   path: "/deepseek"
+  #   upstream: "https://api.deepseek.com"
+  #   timeout: 600
+  #   enabled: true
 
 logging:
   enabled: false

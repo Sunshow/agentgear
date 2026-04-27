@@ -12,19 +12,19 @@ var BuiltinTemplates = []TransformerDef{
 		Builtin:     true,
 	},
 	{
-		Name:                    "$tpl_force_hint_context_length_exceeded",
-		Description:             "上下文超限提示模板：通过返回 context_length_exceeded 错误触发 Agent 自身压缩",
-		Type:                    "error_transform",
-		Direction:               "response",
-		ErrorCode:               "{{error_code}}",
-		ErrorMessage:            "{{error_message}}",
-		RequestSizeThresholdTpl: "{{request_size_threshold}}",
-		ContextTokenLimitTpl:    "{{context_token_limit}}",
+		Name:                     "$tpl_force_hint_context_length_exceeded",
+		Description:              "上下文超限提示模板：通过返回 context_length_exceeded 错误触发 Agent 自身压缩",
+		Type:                     "error_transform",
+		Direction:                "response",
+		ErrorCode:                "{{error_code}}",
+		ErrorMessage:             "{{error_message}}",
+		RequestSizeThresholdTpl:  "{{request_size_threshold}}",
+		ContextTokenLimitTpl:     "{{context_token_limit}}",
 		ContextThresholdRatioTpl: "{{context_threshold_ratio}}",
-		TokenEstimateRatioTpl:   "{{token_estimate_ratio}}",
-		ImageTokenEstimateTpl:   "{{image_token_estimate}}",
-		IsTemplate:              true,
-		Builtin:                 true,
+		TokenEstimateRatioTpl:    "{{token_estimate_ratio}}",
+		ImageTokenEstimateTpl:    "{{image_token_estimate}}",
+		IsTemplate:               true,
+		Builtin:                  true,
 	},
 	{
 		Name:         "$tpl_chunked_write_hint",
@@ -278,6 +278,15 @@ Read the complete conversation and generate a structured summary according to th
 		Builtin:     true,
 	},
 
+	// === Thinking Preserve 转换器 ===
+	{
+		Name:        "$preserve_thinking_blocks",
+		Description: "保留 thinking blocks signature，防止下游 Agent 丢弃空 thinking 后导致 400 错误",
+		Type:        "thinking_preserve",
+		Direction:   "both",
+		Builtin:     true,
+	},
+
 	// === Thinking 模式注入转换器 ===
 	{
 		Name:        "$upstream_kiro_thinking_inject",
@@ -358,6 +367,15 @@ var BuiltinMappings = []MappingRule{
 		Enabled:     true,
 		Tags:        []string{"$a_droid", "$u_warp"},
 		Transformer: "$droid_warp_Create_to_Write",
+		Builtin:     true,
+	},
+	// Thinking Preserve: 保留 thinking blocks
+	{
+		Name:        "$preserve_thinking_blocks_mapping",
+		Description: "保留 thinking blocks signature，防止下游 Agent 丢弃空 thinking 后导致 400 错误",
+		Enabled:     true,
+		Tags:        []string{},
+		Transformer: "$preserve_thinking_blocks",
 		Builtin:     true,
 	},
 	// Upstream Kiro 分段写入提示

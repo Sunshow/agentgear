@@ -80,6 +80,10 @@ func runServe(cmd *cobra.Command, args []string) {
 	memoryStore := memory.NewConnectionStore(cfg.Memory)
 	defer memoryStore.Close()
 
+	// Initialize thinking store
+	thinkingStore := memory.NewThinkingStore(memory.DefaultThinkingStoreConfig())
+	defer thinkingStore.Close()
+
 	// Initialize tagging engine
 	taggingEngine := tagging.NewEngine(cfg.Tagging)
 
@@ -138,6 +142,7 @@ func runServe(cmd *cobra.Command, args []string) {
 			LogDir:              cfg.Logging.Dir,
 			LogEnabled:          cfg.Logging.Enabled,
 			MemoryStore:         memoryStore,
+			ThinkingStore:       thinkingStore,
 			TaggingEngine:       taggingEngine,
 			TransformerRegistry: transformerRegistry,
 			WSHub:               wsHub,
