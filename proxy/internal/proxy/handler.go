@@ -1210,6 +1210,14 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 		}
 	}
 
+	// Thinking preserve: cache non-streaming JSON responses too.
+	if h.thinkingPreserver != nil && h.transformerRegistry != nil && resp.StatusCode == 200 {
+		if def := h.transformerRegistry.GetThinkingPreserveTransformer(reqCtx.tags); def != nil {
+			_ = def
+			h.cacheThinkingBlocksFromJSON(reqCtx.transformedReqBody, decompressedBody)
+		}
+	}
+
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
 }
 
@@ -1469,7 +1477,8 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 	// Thinking preserve: cache thinking blocks from response
 	if h.thinkingPreserver != nil && h.transformerRegistry != nil && resp.StatusCode == 200 {
 		if def := h.transformerRegistry.GetThinkingPreserveTransformer(reqCtx.tags); def != nil {
-			h.cacheThinkingBlocksFromSSE(originalBuffer.Bytes())
+			_ = def
+			h.cacheThinkingBlocksFromSSE(reqCtx.transformedReqBody, originalBuffer.Bytes())
 		}
 	}
 
@@ -1480,7 +1489,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 }
 
 // cacheThinkingBlocksFromSSE parses SSE response buffer to extract and cache thinking blocks
-func (h *Handler) cacheThinkingBlocksFromSSE(sseData []byte) {
+func (h *Handler) cacheThinkingBlocksFromSSE(requestBody []byte, sseData []byte) {
 	// Track content blocks by index
 	type blockInfo struct {
 		blockType string
@@ -1546,6 +1555,14 @@ func (h *Handler) cacheThinkingBlocksFromSSE(sseData []byte) {
 			case "signature_delta":
 				if s, ok := delta["signature"].(string); ok {
 					bi.signature += s
+				}
+			case "text_delta":
+				// Accumulate streamed text so the response-side content hash matches
+				// the text-only assistant message the downstream agent may send back.
+				if bi.rawBlock != nil {
+					prev, _ := bi.rawBlock["text"].(string)
+					text, _ := delta["text"].(string)
+					bi.rawBlock["text"] = prev + text
 				}
 			case "input_json_delta":
 				// Accumulate tool input for hash matching
@@ -1618,7 +1635,30 @@ func (h *Handler) cacheThinkingBlocksFromSSE(sseData []byte) {
 	allBlocks := make([]map[string]interface{}, 0, len(thinkingBlocks)+len(nonThinkingBlocks))
 	allBlocks = append(allBlocks, thinkingBlocks...)
 	allBlocks = append(allBlocks, nonThinkingBlocks...)
-	h.thinkingPreserver.CacheFromResponse(allBlocks)
+	h.thinkingPreserver.CacheFromResponse(requestBody, allBlocks)
+}
+
+func (h *Handler) cacheThinkingBlocksFromJSON(requestBody []byte, respBody []byte) {
+	var payload map[string]interface{}
+	if err := json.Unmarshal(respBody, &payload); err != nil {
+		return
+	}
+
+	contentRaw, ok := payload["content"].([]interface{})
+	if !ok || len(contentRaw) == 0 {
+		return
+	}
+
+	contentBlocks := make([]map[string]interface{}, 0, len(contentRaw))
+	for _, item := range contentRaw {
+		block, ok := item.(map[string]interface{})
+		if !ok {
+			return
+		}
+		contentBlocks = append(contentBlocks, block)
+	}
+
+	h.thinkingPreserver.CacheFromResponse(requestBody, contentBlocks)
 }
 
 type sseEvent struct {
