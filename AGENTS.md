@@ -55,6 +55,7 @@ agentgear/
 | 流式处理 | `docs/core-features/streaming.md` |
 | 内部 API 接口 | `docs/core-features/internal-api.md` |
 | 部署与构建 | `docs/integration/deployment.md` |
+| Thinking Preserve（保留 thinking blocks） | `docs/core-features/thinking-preserve.md` |
 | 上下文压缩 | `docs/integration/compression.md` |
 | GUI 对话框开发 | `docs/gui/dialogs.md` |
 | GUI 组件使用 | `docs/gui/components.md` |
