@@ -19,7 +19,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "tauri": "tauri",
-    "tauri:dev": "source ~/.cargo/env && npm run tauri dev",
+    "tauri:dev": "bash scripts/tauri-dev.sh",
     "tauri:build": "npm run tauri build"
   },
   "dependencies": {
