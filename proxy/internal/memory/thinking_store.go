@@ -16,10 +16,11 @@ type ThinkingBlock struct {
 }
 
 type ThinkingEntry struct {
-	PrefixHash  string
-	VisibleHash string
-	Content     []map[string]interface{}
-	CachedAt    time.Time
+	PrefixHash      string
+	VisibleHash     string
+	Content         []map[string]interface{}
+	CachedAt        time.Time
+	lastPersistedAt time.Time
 }
 
 type ThinkingStoreConfig struct {
@@ -53,8 +54,9 @@ type persistedThinkingStore struct {
 }
 
 const (
-	thinkingStorePersistVersion  = 1
-	thinkingStorePersistDebounce = time.Second
+	thinkingStorePersistVersion       = 1
+	thinkingStorePersistDebounce      = time.Second
+	thinkingStoreTouchPersistInterval = 5 * time.Minute
 )
 
 func NewThinkingStore(cfg ThinkingStoreConfig) *ThinkingStore {
@@ -97,6 +99,7 @@ func (s *ThinkingStore) Put(prefixHash, visibleHash string, content []map[string
 		Content:     cloneThinkingContent(content),
 		CachedAt:    time.Now(),
 	}
+	s.entries[key].lastPersistedAt = s.entries[key].CachedAt
 	s.markDirty()
 }
 
@@ -114,7 +117,10 @@ func (s *ThinkingStore) Get(prefixHash, visibleHash string) ([]map[string]interf
 	if entry, ok := s.entries[makeThinkingStoreKey(prefixHash, visibleHash)]; ok {
 		if now.Sub(entry.CachedAt) <= ttl {
 			entry.CachedAt = now
-			s.markDirty()
+			if now.Sub(entry.lastPersistedAt) >= thinkingStoreTouchPersistInterval {
+				entry.lastPersistedAt = now
+				s.markDirty()
+			}
 			return cloneThinkingContent(entry.Content), "exact"
 		}
 		delete(s.entries, makeThinkingStoreKey(prefixHash, visibleHash))
@@ -138,7 +144,10 @@ func (s *ThinkingStore) Get(prefixHash, visibleHash string) ([]map[string]interf
 
 	if fallback != nil {
 		fallback.CachedAt = now
-		s.markDirty()
+		if now.Sub(fallback.lastPersistedAt) >= thinkingStoreTouchPersistInterval {
+			fallback.lastPersistedAt = now
+			s.markDirty()
+		}
 		return cloneThinkingContent(fallback.Content), "visible_hash"
 	}
 
@@ -324,7 +333,16 @@ func (s *ThinkingStore) persistToDisk() error {
 	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, s.config.PersistPath)
+	if err := os.Rename(tmpPath, s.config.PersistPath); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.entries {
+		entry.lastPersistedAt = entry.CachedAt
+	}
+	return nil
 }
 
 func (s *ThinkingStore) snapshotEntries() []*ThinkingEntry {
@@ -382,5 +400,6 @@ func (s *ThinkingStore) loadPersisted() {
 			Content:     cloneThinkingContent(entry.Content),
 			CachedAt:    entry.CachedAt,
 		}
+		s.entries[makeThinkingStoreKey(entry.PrefixHash, entry.VisibleHash)].lastPersistedAt = entry.CachedAt
 	}
 }

@@ -86,7 +86,7 @@ type ThinkingStoreConfig struct {
 
 - 默认会将快照持久化到 `./data/thinking_store.json`
 - 启动时自动加载持久化快照，关闭时强制 flush
-- 运行中采用 debounce 原子刷盘（临时文件 + rename）
+- 运行中采用 debounce 原子刷盘（临时文件 + rename），访问时间只按粗粒度同步到磁盘，避免命中请求触发高频全量重写
 - TTL 默认 24 小时，最多 5000 条，自动过期淘汰
 - 命中条目会刷新访问时间，避免长会话中仍在使用的旧 assistant 快照被过早淘汰
 
