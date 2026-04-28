@@ -555,3 +555,28 @@ func (s *Server) deleteMappingRule(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 }
+
+// Session log toggle handlers
+
+func (s *Server) getSessionLogStatus(c *gin.Context) {
+	enabled := s.sessionLogEnabled != nil && s.sessionLogEnabled.Load()
+	c.JSON(http.StatusOK, gin.H{"enabled": enabled})
+}
+
+func (s *Server) setSessionLogStatus(c *gin.Context) {
+	if s.sessionLogEnabled == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "session log toggle not available"})
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	s.sessionLogEnabled.Store(req.Enabled)
+	c.JSON(http.StatusOK, gin.H{"enabled": req.Enabled})
+}

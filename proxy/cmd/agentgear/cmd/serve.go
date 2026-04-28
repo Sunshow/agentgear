@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -65,6 +66,10 @@ func runServe(cmd *cobra.Command, args []string) {
 	log.Printf("Transformers: %d definitions, %d mappings", len(cfg.Transformers.Definitions), len(cfg.Transformers.Mappings))
 	log.Printf("===========================\n")
 
+	// Shared session log toggle across all handlers and API server
+	var sessionLogEnabled atomic.Bool
+	sessionLogEnabled.Store(cfg.Logging.Enabled)
+
 	// Business logger: always enabled for tagging/transformer/mapping logs
 	businessLogger, err := logger.NewBusinessLogger(cfg.Logging.Dir)
 	if err != nil {
@@ -97,13 +102,14 @@ func runServe(cmd *cobra.Command, args []string) {
 	// Start API server in goroutine
 	if cfg.Server.APIPort > 0 {
 		apiServer := api.NewServer(api.Config{
-			Host:         cfg.Server.APIHost,
-			Port:         cfg.Server.APIPort,
-			Store:        memoryStore,
-			Tagging:      taggingEngine,
-			Transformer:  transformerRegistry,
-			ConfigWriter: configWriter,
-			Logger:       businessLogger.Logger,
+			Host:              cfg.Server.APIHost,
+			Port:              cfg.Server.APIPort,
+			Store:             memoryStore,
+			Tagging:           taggingEngine,
+			Transformer:       transformerRegistry,
+			ConfigWriter:      configWriter,
+			Logger:            businessLogger.Logger,
+			SessionLogEnabled: &sessionLogEnabled,
 		})
 		apiServer.SetWSHub(wsHub)
 
@@ -140,7 +146,7 @@ func runServe(cmd *cobra.Command, args []string) {
 			Timeout:             time.Duration(gw.Timeout) * time.Second,
 			BusinessLogger:      businessLogger.Logger,
 			LogDir:              cfg.Logging.Dir,
-			LogEnabled:          cfg.Logging.Enabled,
+			LogEnabled:          &sessionLogEnabled,
 			MemoryStore:         memoryStore,
 			ThinkingStore:       thinkingStore,
 			TaggingEngine:       taggingEngine,

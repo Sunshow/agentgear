@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sunshow/agentgear/proxy/internal/config"
@@ -13,23 +14,25 @@ import (
 )
 
 type Server struct {
-	router       *gin.Engine
-	store        *memory.ConnectionStore
-	tagging      *tagging.Engine
-	transformer  *transformer.Registry
-	configWriter *config.ConfigWriter
-	logger       *zap.Logger
-	addr         string
+	router            *gin.Engine
+	store             *memory.ConnectionStore
+	tagging           *tagging.Engine
+	transformer       *transformer.Registry
+	configWriter      *config.ConfigWriter
+	logger            *zap.Logger
+	sessionLogEnabled *atomic.Bool
+	addr              string
 }
 
 type Config struct {
-	Host         string
-	Port         int
-	Store        *memory.ConnectionStore
-	Tagging      *tagging.Engine
-	Transformer  *transformer.Registry
-	ConfigWriter *config.ConfigWriter
-	Logger       *zap.Logger
+	Host              string
+	Port              int
+	Store             *memory.ConnectionStore
+	Tagging           *tagging.Engine
+	Transformer       *transformer.Registry
+	ConfigWriter      *config.ConfigWriter
+	Logger            *zap.Logger
+	SessionLogEnabled *atomic.Bool
 }
 
 func NewServer(cfg Config) *Server {
@@ -39,13 +42,14 @@ func NewServer(cfg Config) *Server {
 	router.Use(corsMiddleware())
 
 	s := &Server{
-		router:       router,
-		store:        cfg.Store,
-		tagging:      cfg.Tagging,
-		transformer:  cfg.Transformer,
-		configWriter: cfg.ConfigWriter,
-		logger:       cfg.Logger,
-		addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		router:            router,
+		store:             cfg.Store,
+		tagging:           cfg.Tagging,
+		transformer:       cfg.Transformer,
+		configWriter:      cfg.ConfigWriter,
+		logger:            cfg.Logger,
+		sessionLogEnabled: cfg.SessionLogEnabled,
+		addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 	}
 
 	s.setupRoutes()
@@ -103,6 +107,10 @@ func (s *Server) setupRoutes() {
 
 		api.POST("/config/save", s.saveConfig)
 		api.POST("/restart", s.restartProxy)
+
+		// Session log toggle
+		api.GET("/session-log", s.getSessionLogStatus)
+		api.POST("/session-log", s.setSessionLogStatus)
 	}
 }
 

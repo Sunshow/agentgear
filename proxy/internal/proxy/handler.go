@@ -35,7 +35,7 @@ type Handler struct {
 	timeout             time.Duration
 	businessLogger      *zap.Logger
 	logDir              string
-	logEnabled          bool
+	logEnabled          *atomic.Bool
 	httpClient          *http.Client
 	sessionSequences    sync.Map
 	toolMapper          *transformer.ToolMapper
@@ -55,7 +55,7 @@ type Config struct {
 	Timeout             time.Duration
 	BusinessLogger      *zap.Logger
 	LogDir              string
-	LogEnabled          bool
+	LogEnabled          *atomic.Bool
 	MemoryStore         *memory.ConnectionStore
 	ThinkingStore       *memory.ThinkingStore
 	TaggingEngine       *tagging.Engine
@@ -2192,7 +2192,7 @@ func (h *Handler) flushAccumulator(acc *toolBlockAccumulator, nextOutputIndex *i
 
 func (h *Handler) saveLog(reqCtx *requestContext) {
 	// 如果不是强制记录且日志未启用，则跳过
-	if !reqCtx.forceLog && !h.logEnabled {
+	if !reqCtx.forceLog && (h.logEnabled == nil || !h.logEnabled.Load()) {
 		return
 	}
 
@@ -2249,7 +2249,7 @@ func (h *Handler) saveLog(reqCtx *requestContext) {
 
 func (h *Handler) saveTransformedResponse(reqCtx *requestContext, transformedBody []byte) {
 	// 如果不是强制记录且日志未启用，则跳过
-	if !reqCtx.forceLog && !h.logEnabled {
+	if !reqCtx.forceLog && (h.logEnabled == nil || !h.logEnabled.Load()) {
 		return
 	}
 
