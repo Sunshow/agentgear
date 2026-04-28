@@ -71,8 +71,9 @@ type ThinkingStore struct {
 }
 
 type ThinkingStoreConfig struct {
-    MaxEntries      int // 最大条目数，默认 200
-    EntryTTLMinutes int // 条目过期时间，默认 30 分钟
+    MaxEntries      int    // 最大条目数，默认 5000
+    EntryTTLMinutes int    // 条目过期时间，默认 1440 分钟（24 小时）
+    PersistPath     string // 持久化快照路径，默认 ./data/thinking_store.json
 }
 ```
 
@@ -83,9 +84,11 @@ type ThinkingStoreConfig struct {
 
 ### 缓存生命周期
 
-- 内存缓存，进程重启后丢失
-- TTL 30 分钟，最多 200 条，自动过期淘汰
-- 重启后的风险窗口很小：新对话第一轮无历史消息，后续响应会重新缓存
+- 默认会将快照持久化到 `./data/thinking_store.json`
+- 启动时自动加载持久化快照，关闭时强制 flush
+- 运行中采用 debounce 原子刷盘（临时文件 + rename）
+- TTL 默认 24 小时，最多 5000 条，自动过期淘汰
+- 命中条目会刷新访问时间，避免长会话中仍在使用的旧 assistant 快照被过早淘汰
 
 ## 匹配策略
 
@@ -213,7 +216,7 @@ transformers:
 | 流式响应中途断开/error | 不写入缓存（非 200 响应不处理） |
 | 并发请求 | ThinkingStore 使用读写锁保护 |
 | 同一条消息被多次请求 | hash 匹配保证幂等注入 |
-| 进程重启 | 缓存丢失，新响应会重新缓存 |
+| 进程重启 | 默认从持久化快照恢复；若快照不存在则新响应会重新缓存 |
 | Agent 修改了 text 内容 | hash 不匹配，透传不修改 |
 | content 含 cache_control 等额外字段 | hash 计算时排除，不影响匹配 |
 
