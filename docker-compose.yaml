@@ -20,9 +20,9 @@ services:
       - AGENTGEAR_MEMORY_RETENTION_MINUTES=60
       - AGENTGEAR_THINKING_STORE_PERSIST_PATH=/app/data/thinking_store.db
     volumes:
-      - ./logs:/app/logs
+      - ./logs:/app/logs        # 确保宿主机目录权限: sudo chown -R 1000:1000 ./logs
       - ./proxy/configs/config.yaml:/app/configs/config.yaml:ro
-      - ./data:/app/data
+      - ./data:/app/data        # 确保宿主机目录权限: sudo chown -R 1000:1000 ./data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9000/health"]
