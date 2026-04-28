@@ -10,12 +10,13 @@ import (
 )
 
 type Config struct {
-	Server       ServerConfig       `mapstructure:"server"`
-	Gateways     []GatewayConfig    `mapstructure:"gateways"`
-	Logging      LoggingConfig      `mapstructure:"logging"`
-	Memory       memory.StoreConfig `mapstructure:"memory"`
-	Tagging      tagging.Config     `mapstructure:"tagging"`
-	Transformers transformer.Config `mapstructure:"transformers"`
+	Server        ServerConfig               `mapstructure:"server"`
+	Gateways      []GatewayConfig            `mapstructure:"gateways"`
+	Logging       LoggingConfig              `mapstructure:"logging"`
+	Memory        memory.StoreConfig         `mapstructure:"memory"`
+	ThinkingStore memory.ThinkingStoreConfig `mapstructure:"thinking_store"`
+	Tagging       tagging.Config             `mapstructure:"tagging"`
+	Transformers  transformer.Config         `mapstructure:"transformers"`
 }
 
 type ServerConfig struct {
@@ -74,6 +75,11 @@ func Load(configPath string) (*Config, error) {
 	viper.SetDefault("memory.max_request_body_kb", 512)
 	viper.SetDefault("memory.max_response_body_kb", 512)
 	viper.SetDefault("memory.retention_minutes", 60)
+
+	// Thinking preserve defaults
+	viper.SetDefault("thinking_store.max_entries", 50000)
+	viper.SetDefault("thinking_store.entry_ttl_minutes", 24*60)
+	viper.SetDefault("thinking_store.persist_path", "./data/thinking_store.db")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

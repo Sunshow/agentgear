@@ -62,6 +62,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	log.Printf("Logging: enabled=%v, dir=%s", cfg.Logging.Enabled, cfg.Logging.Dir)
 	log.Printf("Memory: max_connections=%d, retention=%dm", cfg.Memory.MaxConnections, cfg.Memory.RetentionMinutes)
+	log.Printf("ThinkingStore: max_entries=%d, ttl=%dm", cfg.ThinkingStore.MaxEntries, cfg.ThinkingStore.EntryTTLMinutes)
 	log.Printf("Tagging: %d rules", len(cfg.Tagging.Rules))
 	log.Printf("Transformers: %d definitions, %d mappings", len(cfg.Transformers.Definitions), len(cfg.Transformers.Mappings))
 	log.Printf("===========================\n")
@@ -86,7 +87,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	defer memoryStore.Close()
 
 	// Initialize thinking store
-	thinkingStore := memory.NewThinkingStore(memory.DefaultThinkingStoreConfig())
+	thinkingStore := memory.NewThinkingStore(cfg.ThinkingStore)
 	defer thinkingStore.Close()
 
 	// Initialize tagging engine

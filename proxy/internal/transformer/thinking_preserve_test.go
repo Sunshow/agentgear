@@ -2,6 +2,7 @@ package transformer
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/sunshow/agentgear/proxy/internal/memory"
@@ -10,7 +11,9 @@ import (
 
 func TestThinkingPreserver_CachesNonStreamingResponseAndRepairsTextOnlyHistory(t *testing.T) {
 	logger := zap.NewNop()
-	store := memory.NewThinkingStore(memory.DefaultThinkingStoreConfig())
+	cfg := memory.DefaultThinkingStoreConfig()
+	cfg.PersistPath = filepath.Join(t.TempDir(), "thinking-store.db")
+	store := memory.NewThinkingStore(cfg)
 	defer store.Close()
 
 	preserver := NewThinkingPreserver(store, logger)
@@ -45,7 +48,9 @@ func TestThinkingPreserver_CachesNonStreamingResponseAndRepairsTextOnlyHistory(t
 
 func TestThinkingPreserver_ReplacesPartialThinkingContent(t *testing.T) {
 	logger := zap.NewNop()
-	store := memory.NewThinkingStore(memory.DefaultThinkingStoreConfig())
+	cfg := memory.DefaultThinkingStoreConfig()
+	cfg.PersistPath = filepath.Join(t.TempDir(), "thinking-store.db")
+	store := memory.NewThinkingStore(cfg)
 	defer store.Close()
 
 	preserver := NewThinkingPreserver(store, logger)
@@ -100,7 +105,9 @@ func TestThinkingPreserver_ReplacesPartialThinkingContent(t *testing.T) {
 
 func TestThinkingPreserver_PrefersExactPrefixMatchForVisibleHashCollisions(t *testing.T) {
 	logger := zap.NewNop()
-	store := memory.NewThinkingStore(memory.DefaultThinkingStoreConfig())
+	cfg := memory.DefaultThinkingStoreConfig()
+	cfg.PersistPath = filepath.Join(t.TempDir(), "thinking-store.db")
+	store := memory.NewThinkingStore(cfg)
 	defer store.Close()
 
 	preserver := NewThinkingPreserver(store, logger)

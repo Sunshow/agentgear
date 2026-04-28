@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/sunshow/agentgear/proxy/internal/memory"
@@ -11,7 +12,9 @@ import (
 
 func TestCacheThinkingBlocksFromSSE_ReinjectsForStreamedTextResponses(t *testing.T) {
 	logger := zap.NewNop()
-	store := memory.NewThinkingStore(memory.DefaultThinkingStoreConfig())
+	cfg := memory.DefaultThinkingStoreConfig()
+	cfg.PersistPath = filepath.Join(t.TempDir(), "thinking-store.db")
+	store := memory.NewThinkingStore(cfg)
 	defer store.Close()
 
 	handler := &Handler{
