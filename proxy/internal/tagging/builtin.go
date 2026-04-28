@@ -56,6 +56,22 @@ var BuiltinRules = []Rule{
 		DynamicTagsFunc: extractOpenCodeTags,
 	},
 	{
+		Name:     "$A_ClaudeCode",
+		Priority: -1000,
+		Builtin:  true,
+		Matchers: []Matcher{
+			{
+				Type: MatcherTypeHeader,
+				Key:  "User-Agent",
+				Match: ValueMatcher{
+					Op:    MatchOpRegex,
+					Value: `^claude-cli/\d+\.\d+\.\d+`,
+				},
+			},
+		},
+		Tags: []string{"$a_claudecode"},
+	},
+	{
 		Name:     "$P_Anthropic",
 		Priority: -1000,
 		Builtin:  true,

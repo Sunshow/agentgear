@@ -369,12 +369,13 @@ var BuiltinMappings = []MappingRule{
 		Transformer: "$droid_warp_Create_to_Write",
 		Builtin:     true,
 	},
-	// Thinking Preserve: 保留 thinking blocks
+	// Thinking Preserve: 保留 thinking blocks (仅 deepseek 上游，排除 claudecode agent)
 	{
 		Name:        "$preserve_thinking_blocks_mapping",
 		Description: "保留 thinking blocks signature，防止下游 Agent 丢弃空 thinking 后导致 400 错误",
 		Enabled:     true,
-		Tags:        []string{},
+		Tags:        []string{"$u_deepseek"},
+		ExcludeTags: []string{"$a_claudecode"},
 		Transformer: "$preserve_thinking_blocks",
 		Builtin:     true,
 	},

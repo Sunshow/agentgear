@@ -18,9 +18,11 @@ services:
       - AGENTGEAR_LOGGING_DIR=/app/logs
       - AGENTGEAR_MEMORY_MAX_CONNECTIONS=1000
       - AGENTGEAR_MEMORY_RETENTION_MINUTES=60
+      - AGENTGEAR_THINKING_STORE_PERSIST_PATH=/app/data/thinking_store.db
     volumes:
       - ./logs:/app/logs
       - ./proxy/configs/config.yaml:/app/configs/config.yaml:ro
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9000/health"]

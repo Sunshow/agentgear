@@ -34,7 +34,7 @@ COPY --from=builder /app/agentgear .
 COPY --from=builder /app/configs/config.example.yaml ./configs/config.yaml
 
 # Create logs directory
-RUN mkdir -p /app/logs && chown -R agentgear:agentgear /app
+RUN mkdir -p /app/logs /app/data && chown -R agentgear:agentgear /app
 
 # Switch to non-root user
 USER agentgear
