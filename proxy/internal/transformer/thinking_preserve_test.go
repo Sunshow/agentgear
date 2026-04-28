@@ -12,7 +12,7 @@ import (
 func TestThinkingPreserver_CachesNonStreamingResponseAndRepairsTextOnlyHistory(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := memory.DefaultThinkingStoreConfig()
-	cfg.PersistPath = filepath.Join(t.TempDir(), "thinking-store.json")
+	cfg.PersistPath = filepath.Join(t.TempDir(), "thinking-store.db")
 	store := memory.NewThinkingStore(cfg)
 	defer store.Close()
 
@@ -49,7 +49,7 @@ func TestThinkingPreserver_CachesNonStreamingResponseAndRepairsTextOnlyHistory(t
 func TestThinkingPreserver_ReplacesPartialThinkingContent(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := memory.DefaultThinkingStoreConfig()
-	cfg.PersistPath = filepath.Join(t.TempDir(), "thinking-store.json")
+	cfg.PersistPath = filepath.Join(t.TempDir(), "thinking-store.db")
 	store := memory.NewThinkingStore(cfg)
 	defer store.Close()
 
@@ -106,7 +106,7 @@ func TestThinkingPreserver_ReplacesPartialThinkingContent(t *testing.T) {
 func TestThinkingPreserver_PrefersExactPrefixMatchForVisibleHashCollisions(t *testing.T) {
 	logger := zap.NewNop()
 	cfg := memory.DefaultThinkingStoreConfig()
-	cfg.PersistPath = filepath.Join(t.TempDir(), "thinking-store.json")
+	cfg.PersistPath = filepath.Join(t.TempDir(), "thinking-store.db")
 	store := memory.NewThinkingStore(cfg)
 	defer store.Close()
 

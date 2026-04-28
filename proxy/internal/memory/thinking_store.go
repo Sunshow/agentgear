@@ -5,8 +5,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 type ThinkingBlock struct {
@@ -16,10 +19,10 @@ type ThinkingBlock struct {
 }
 
 type ThinkingEntry struct {
-	PrefixHash      string
-	VisibleHash     string
-	Content         []map[string]interface{}
-	CachedAt        time.Time
+	PrefixHash      string                   `json:"prefix_hash"`
+	VisibleHash     string                   `json:"visible_hash"`
+	Content         []map[string]interface{} `json:"content"`
+	CachedAt        time.Time                `json:"cached_at"`
 	lastPersistedAt time.Time
 }
 
@@ -31,52 +34,67 @@ type ThinkingStoreConfig struct {
 
 func DefaultThinkingStoreConfig() ThinkingStoreConfig {
 	return ThinkingStoreConfig{
-		MaxEntries:      5000,
+		MaxEntries:      50000,
 		EntryTTLMinutes: 24 * 60,
-		PersistPath:     "./data/thinking_store.json",
+		PersistPath:     "./data/thinking_store.db",
 	}
 }
 
 type ThinkingStore struct {
-	mu           sync.RWMutex
-	entries      map[string]*ThinkingEntry
-	config       ThinkingStoreConfig
-	stopCleanup  chan struct{}
-	stopPersist  chan struct{}
-	persistDirty chan struct{}
-	persistDone  chan struct{}
-	closeOnce    sync.Once
+	mu             sync.RWMutex
+	entries        map[string]*ThinkingEntry
+	pendingUpserts map[string]*ThinkingEntry
+	pendingDeletes map[string]struct{}
+	config         ThinkingStoreConfig
+	db             *bolt.DB
+	stopCleanup    chan struct{}
+	stopPersist    chan struct{}
+	persistDirty   chan struct{}
+	persistDone    chan struct{}
+	closeOnce      sync.Once
 }
 
-type persistedThinkingStore struct {
-	Version int              `json:"version"`
-	Entries []*ThinkingEntry `json:"entries"`
+type persistedThinkingEntry struct {
+	Key   string
+	Entry *ThinkingEntry
 }
 
 const (
-	thinkingStorePersistVersion       = 1
+	thinkingStoreBucketName           = "thinking_entries"
 	thinkingStorePersistDebounce      = time.Second
 	thinkingStoreTouchPersistInterval = 5 * time.Minute
+	thinkingStoreDBTimeout            = time.Second
 )
 
 func NewThinkingStore(cfg ThinkingStoreConfig) *ThinkingStore {
 	if cfg.MaxEntries == 0 {
-		cfg.MaxEntries = 5000
+		cfg.MaxEntries = 50000
 	}
 	if cfg.EntryTTLMinutes == 0 {
 		cfg.EntryTTLMinutes = 24 * 60
 	}
+
 	s := &ThinkingStore{
-		entries:      make(map[string]*ThinkingEntry),
-		config:       cfg,
-		stopCleanup:  make(chan struct{}),
-		stopPersist:  make(chan struct{}),
-		persistDirty: make(chan struct{}, 1),
-		persistDone:  make(chan struct{}),
+		entries:        make(map[string]*ThinkingEntry),
+		pendingUpserts: make(map[string]*ThinkingEntry),
+		pendingDeletes: make(map[string]struct{}),
+		config:         cfg,
+		stopCleanup:    make(chan struct{}),
+		stopPersist:    make(chan struct{}),
+		persistDirty:   make(chan struct{}, 1),
+		persistDone:    make(chan struct{}),
+	}
+
+	if err := s.openDB(); err != nil {
+		log.Printf("thinking_store: failed to open bbolt store, falling back to memory-only mode: %v", err)
 	}
 	s.loadPersisted()
 	go s.cleanupLoop()
-	go s.persistLoop()
+	if s.db != nil {
+		go s.persistLoop()
+	} else {
+		close(s.persistDone)
+	}
 	return s
 }
 
@@ -85,22 +103,26 @@ func (s *ThinkingStore) Put(prefixHash, visibleHash string, content []map[string
 		return
 	}
 
+	now := time.Now()
+	key := makeThinkingStoreKey(prefixHash, visibleHash)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	key := makeThinkingStoreKey(prefixHash, visibleHash)
 	if _, exists := s.entries[key]; !exists && len(s.entries) >= s.config.MaxEntries {
-		s.evictOldest()
+		if evictedKey := s.evictOldestLocked(); evictedKey != "" {
+			s.queueDeleteLocked(evictedKey)
+		}
 	}
 
-	s.entries[key] = &ThinkingEntry{
+	entry := &ThinkingEntry{
 		PrefixHash:  prefixHash,
 		VisibleHash: visibleHash,
 		Content:     cloneThinkingContent(content),
-		CachedAt:    time.Now(),
+		CachedAt:    now,
 	}
-	s.entries[key].lastPersistedAt = s.entries[key].CachedAt
-	s.markDirty()
+	s.entries[key] = entry
+	s.queueUpsertLocked(key, entry)
 }
 
 func (s *ThinkingStore) Get(prefixHash, visibleHash string) ([]map[string]interface{}, string) {
@@ -112,25 +134,27 @@ func (s *ThinkingStore) Get(prefixHash, visibleHash string) ([]map[string]interf
 	defer s.mu.Unlock()
 
 	now := time.Now()
-	ttl := time.Duration(s.config.EntryTTLMinutes) * time.Minute
+	ttl := s.entryTTL()
+	key := makeThinkingStoreKey(prefixHash, visibleHash)
 
-	if entry, ok := s.entries[makeThinkingStoreKey(prefixHash, visibleHash)]; ok {
+	if entry, ok := s.entries[key]; ok {
 		if now.Sub(entry.CachedAt) <= ttl {
 			entry.CachedAt = now
-			if now.Sub(entry.lastPersistedAt) >= thinkingStoreTouchPersistInterval {
-				entry.lastPersistedAt = now
-				s.markDirty()
+			if s.shouldPersistTouch(entry, now) {
+				s.queueUpsertLocked(key, entry)
 			}
 			return cloneThinkingContent(entry.Content), "exact"
 		}
-		delete(s.entries, makeThinkingStoreKey(prefixHash, visibleHash))
-		s.markDirty()
+		delete(s.entries, key)
+		s.queueDeleteLocked(key)
 	}
 
+	var fallbackKey string
 	var fallback *ThinkingEntry
-	for key, entry := range s.entries {
+	for candidateKey, entry := range s.entries {
 		if now.Sub(entry.CachedAt) > ttl {
-			delete(s.entries, key)
+			delete(s.entries, candidateKey)
+			s.queueDeleteLocked(candidateKey)
 			continue
 		}
 		if entry.VisibleHash != visibleHash {
@@ -139,35 +163,19 @@ func (s *ThinkingStore) Get(prefixHash, visibleHash string) ([]map[string]interf
 		if fallback != nil {
 			return nil, ""
 		}
+		fallbackKey = candidateKey
 		fallback = entry
 	}
 
 	if fallback != nil {
 		fallback.CachedAt = now
-		if now.Sub(fallback.lastPersistedAt) >= thinkingStoreTouchPersistInterval {
-			fallback.lastPersistedAt = now
-			s.markDirty()
+		if s.shouldPersistTouch(fallback, now) {
+			s.queueUpsertLocked(fallbackKey, fallback)
 		}
 		return cloneThinkingContent(fallback.Content), "visible_hash"
 	}
 
 	return nil, ""
-}
-
-func (s *ThinkingStore) evictOldest() {
-	var oldestKey string
-	var oldestTime time.Time
-
-	for k, v := range s.entries {
-		if oldestKey == "" || v.CachedAt.Before(oldestTime) {
-			oldestKey = k
-			oldestTime = v.CachedAt
-		}
-	}
-
-	if oldestKey != "" {
-		delete(s.entries, oldestKey)
-	}
 }
 
 func (s *ThinkingStore) cleanupLoop() {
@@ -188,26 +196,26 @@ func (s *ThinkingStore) cleanupExpired() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ttl := time.Duration(s.config.EntryTTLMinutes) * time.Minute
 	now := time.Now()
-	changed := false
-
-	for k, v := range s.entries {
-		if now.Sub(v.CachedAt) > ttl {
-			delete(s.entries, k)
-			changed = true
+	ttl := s.entryTTL()
+	for key, entry := range s.entries {
+		if now.Sub(entry.CachedAt) > ttl {
+			delete(s.entries, key)
+			s.queueDeleteLocked(key)
 		}
-	}
-	if changed {
-		s.markDirty()
 	}
 }
 
 func (s *ThinkingStore) Close() {
 	s.closeOnce.Do(func() {
 		close(s.stopCleanup)
-		close(s.stopPersist)
-		<-s.persistDone
+		if s.db != nil {
+			close(s.stopPersist)
+			<-s.persistDone
+			if err := s.db.Close(); err != nil {
+				log.Printf("thinking_store: failed to close bbolt store: %v", err)
+			}
+		}
 	})
 }
 
@@ -217,43 +225,8 @@ func (s *ThinkingStore) Size() int {
 	return len(s.entries)
 }
 
-func makeThinkingStoreKey(prefixHash, visibleHash string) string {
-	return prefixHash + "\x00" + visibleHash
-}
-
-func cloneThinkingContent(content []map[string]interface{}) []map[string]interface{} {
-	if len(content) == 0 {
-		return nil
-	}
-
-	data, err := json.Marshal(content)
-	if err != nil {
-		return nil
-	}
-
-	var cloned []map[string]interface{}
-	if err := json.Unmarshal(data, &cloned); err != nil {
-		return nil
-	}
-	return cloned
-}
-
-func (s *ThinkingStore) markDirty() {
-	if s.config.PersistPath == "" {
-		return
-	}
-	select {
-	case s.persistDirty <- struct{}{}:
-	default:
-	}
-}
-
 func (s *ThinkingStore) persistLoop() {
 	defer close(s.persistDone)
-	if s.config.PersistPath == "" {
-		<-s.stopPersist
-		return
-	}
 
 	var timer *time.Timer
 	var timerC <-chan time.Time
@@ -293,35 +266,92 @@ func (s *ThinkingStore) persistLoop() {
 		case <-s.persistDirty:
 			resetTimer()
 		case <-timerC:
-			if err := s.persistToDisk(); err != nil {
-				log.Printf("thinking_store: failed to persist snapshot: %v", err)
+			if err := s.flushPending(); err != nil {
+				log.Printf("thinking_store: failed to flush bbolt updates: %v", err)
 			}
 			stopTimer()
 		case <-s.stopPersist:
 			stopTimer()
-			if err := s.persistToDisk(); err != nil {
-				log.Printf("thinking_store: failed to persist snapshot during shutdown: %v", err)
+			if err := s.flushPending(); err != nil {
+				log.Printf("thinking_store: failed to flush bbolt updates during shutdown: %v", err)
 			}
 			return
 		}
 	}
 }
 
-func (s *ThinkingStore) persistToDisk() error {
-	if s.config.PersistPath == "" {
+func (s *ThinkingStore) flushPending() error {
+	upserts, deletes := s.drainPending()
+	if len(upserts) == 0 && len(deletes) == 0 {
 		return nil
 	}
 
-	payload := persistedThinkingStore{
-		Version: thinkingStorePersistVersion,
-		Entries: s.snapshotEntries(),
-	}
-
-	data, err := json.Marshal(payload)
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(thinkingStoreBucketName))
+		for key := range deletes {
+			if err := bucket.Delete([]byte(key)); err != nil {
+				return err
+			}
+		}
+		for key, entry := range upserts {
+			payload, err := json.Marshal(entry)
+			if err != nil {
+				return err
+			}
+			if err := bucket.Put([]byte(key), payload); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
+		s.requeuePending(upserts, deletes)
 		return err
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, persisted := range upserts {
+		current := s.entries[key]
+		if current == nil {
+			continue
+		}
+		if current.CachedAt.Equal(persisted.CachedAt) {
+			current.lastPersistedAt = persisted.CachedAt
+		}
+	}
+	return nil
+}
+
+func (s *ThinkingStore) drainPending() (map[string]*ThinkingEntry, map[string]struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	upserts := s.pendingUpserts
+	deletes := s.pendingDeletes
+	s.pendingUpserts = make(map[string]*ThinkingEntry)
+	s.pendingDeletes = make(map[string]struct{})
+	return upserts, deletes
+}
+
+func (s *ThinkingStore) requeuePending(upserts map[string]*ThinkingEntry, deletes map[string]struct{}) {
+	s.mu.Lock()
+	for key, entry := range upserts {
+		delete(s.pendingDeletes, key)
+		s.pendingUpserts[key] = cloneEntry(entry)
+	}
+	for key := range deletes {
+		delete(s.pendingUpserts, key)
+		s.pendingDeletes[key] = struct{}{}
+	}
+	s.mu.Unlock()
+	s.markDirty()
+}
+
+func (s *ThinkingStore) openDB() error {
+	if s.config.PersistPath == "" {
+		return nil
+	}
 	dir := filepath.Dir(s.config.PersistPath)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -329,77 +359,173 @@ func (s *ThinkingStore) persistToDisk() error {
 		}
 	}
 
-	tmpPath := s.config.PersistPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, s.config.PersistPath); err != nil {
+	db, err := bolt.Open(s.config.PersistPath, 0o600, &bolt.Options{Timeout: thinkingStoreDBTimeout})
+	if err != nil {
 		return err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, entry := range s.entries {
-		entry.lastPersistedAt = entry.CachedAt
+	if err := db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(thinkingStoreBucketName))
+		return err
+	}); err != nil {
+		_ = db.Close()
+		return err
 	}
+
+	s.db = db
 	return nil
 }
 
-func (s *ThinkingStore) snapshotEntries() []*ThinkingEntry {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (s *ThinkingStore) loadPersisted() {
+	if s.db == nil {
+		return
+	}
 
 	now := time.Now()
-	ttl := time.Duration(s.config.EntryTTLMinutes) * time.Minute
-	entries := make([]*ThinkingEntry, 0, len(s.entries))
-	for _, entry := range s.entries {
-		if now.Sub(entry.CachedAt) > ttl {
-			continue
-		}
-		entries = append(entries, &ThinkingEntry{
-			PrefixHash:  entry.PrefixHash,
-			VisibleHash: entry.VisibleHash,
-			Content:     cloneThinkingContent(entry.Content),
-			CachedAt:    entry.CachedAt,
+	ttl := s.entryTTL()
+	loaded := make([]persistedThinkingEntry, 0)
+	staleKeys := make([]string, 0)
+
+	err := s.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(thinkingStoreBucketName))
+		return bucket.ForEach(func(key, value []byte) error {
+			var entry ThinkingEntry
+			if err := json.Unmarshal(value, &entry); err != nil {
+				staleKeys = append(staleKeys, string(append([]byte(nil), key...)))
+				return nil
+			}
+			if entry.VisibleHash == "" || len(entry.Content) == 0 || now.Sub(entry.CachedAt) > ttl {
+				staleKeys = append(staleKeys, string(append([]byte(nil), key...)))
+				return nil
+			}
+			entry.lastPersistedAt = entry.CachedAt
+			loaded = append(loaded, persistedThinkingEntry{
+				Key:   string(append([]byte(nil), key...)),
+				Entry: cloneEntry(&entry),
+			})
+			return nil
 		})
+	})
+	if err != nil {
+		log.Printf("thinking_store: failed to load persisted entries: %v", err)
+		return
 	}
-	return entries
+
+	sort.Slice(loaded, func(i, j int) bool {
+		return loaded[i].Entry.CachedAt.After(loaded[j].Entry.CachedAt)
+	})
+
+	if len(loaded) > s.config.MaxEntries {
+		for _, item := range loaded[s.config.MaxEntries:] {
+			staleKeys = append(staleKeys, item.Key)
+		}
+		loaded = loaded[:s.config.MaxEntries]
+	}
+
+	for _, item := range loaded {
+		s.entries[item.Key] = item.Entry
+	}
+
+	if len(staleKeys) > 0 {
+		if err := s.db.Update(func(tx *bolt.Tx) error {
+			bucket := tx.Bucket([]byte(thinkingStoreBucketName))
+			for _, key := range staleKeys {
+				if err := bucket.Delete([]byte(key)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			log.Printf("thinking_store: failed to purge stale persisted entries: %v", err)
+		}
+	}
 }
 
-func (s *ThinkingStore) loadPersisted() {
-	if s.config.PersistPath == "" {
+func (s *ThinkingStore) shouldPersistTouch(entry *ThinkingEntry, now time.Time) bool {
+	if s.db == nil {
+		return false
+	}
+	return entry.lastPersistedAt.IsZero() || now.Sub(entry.lastPersistedAt) >= thinkingStoreTouchPersistInterval
+}
+
+func (s *ThinkingStore) queueUpsertLocked(key string, entry *ThinkingEntry) {
+	if s.db == nil {
 		return
 	}
+	delete(s.pendingDeletes, key)
+	s.pendingUpserts[key] = cloneEntry(entry)
+	s.markDirty()
+}
 
-	data, err := os.ReadFile(s.config.PersistPath)
+func (s *ThinkingStore) queueDeleteLocked(key string) {
+	if s.db == nil {
+		return
+	}
+	delete(s.pendingUpserts, key)
+	s.pendingDeletes[key] = struct{}{}
+	s.markDirty()
+}
+
+func (s *ThinkingStore) evictOldestLocked() string {
+	var oldestKey string
+	var oldestTime time.Time
+
+	for key, entry := range s.entries {
+		if oldestKey == "" || entry.CachedAt.Before(oldestTime) {
+			oldestKey = key
+			oldestTime = entry.CachedAt
+		}
+	}
+	if oldestKey != "" {
+		delete(s.entries, oldestKey)
+	}
+	return oldestKey
+}
+
+func (s *ThinkingStore) entryTTL() time.Duration {
+	return time.Duration(s.config.EntryTTLMinutes) * time.Minute
+}
+
+func (s *ThinkingStore) markDirty() {
+	if s.db == nil {
+		return
+	}
+	select {
+	case s.persistDirty <- struct{}{}:
+	default:
+	}
+}
+
+func makeThinkingStoreKey(prefixHash, visibleHash string) string {
+	return prefixHash + "\x00" + visibleHash
+}
+
+func cloneThinkingContent(content []map[string]interface{}) []map[string]interface{} {
+	if len(content) == 0 {
+		return nil
+	}
+
+	data, err := json.Marshal(content)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Printf("thinking_store: failed to read persisted snapshot: %v", err)
-		}
-		return
+		return nil
 	}
 
-	var payload persistedThinkingStore
-	if err := json.Unmarshal(data, &payload); err != nil {
-		log.Printf("thinking_store: failed to parse persisted snapshot: %v", err)
-		return
+	var cloned []map[string]interface{}
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return nil
 	}
+	return cloned
+}
 
-	now := time.Now()
-	ttl := time.Duration(s.config.EntryTTLMinutes) * time.Minute
-	for _, entry := range payload.Entries {
-		if entry == nil || entry.VisibleHash == "" || len(entry.Content) == 0 {
-			continue
-		}
-		if now.Sub(entry.CachedAt) > ttl {
-			continue
-		}
-		s.entries[makeThinkingStoreKey(entry.PrefixHash, entry.VisibleHash)] = &ThinkingEntry{
-			PrefixHash:  entry.PrefixHash,
-			VisibleHash: entry.VisibleHash,
-			Content:     cloneThinkingContent(entry.Content),
-			CachedAt:    entry.CachedAt,
-		}
-		s.entries[makeThinkingStoreKey(entry.PrefixHash, entry.VisibleHash)].lastPersistedAt = entry.CachedAt
+func cloneEntry(entry *ThinkingEntry) *ThinkingEntry {
+	if entry == nil {
+		return nil
+	}
+	return &ThinkingEntry{
+		PrefixHash:      entry.PrefixHash,
+		VisibleHash:     entry.VisibleHash,
+		Content:         cloneThinkingContent(entry.Content),
+		CachedAt:        entry.CachedAt,
+		lastPersistedAt: entry.lastPersistedAt,
 	}
 }

@@ -77,9 +77,9 @@ func Load(configPath string) (*Config, error) {
 	viper.SetDefault("memory.retention_minutes", 60)
 
 	// Thinking preserve defaults
-	viper.SetDefault("thinking_store.max_entries", 5000)
+	viper.SetDefault("thinking_store.max_entries", 50000)
 	viper.SetDefault("thinking_store.entry_ttl_minutes", 24*60)
-	viper.SetDefault("thinking_store.persist_path", "./data/thinking_store.json")
+	viper.SetDefault("thinking_store.persist_path", "./data/thinking_store.db")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

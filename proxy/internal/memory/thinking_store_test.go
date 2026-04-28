@@ -9,7 +9,7 @@ func TestThinkingStoreGetTouchesExactEntry(t *testing.T) {
 	store := NewThinkingStore(ThinkingStoreConfig{
 		MaxEntries:      2,
 		EntryTTLMinutes: 60,
-		PersistPath:     filepath.Join(t.TempDir(), "thinking-store.json"),
+		PersistPath:     filepath.Join(t.TempDir(), "thinking-store.db"),
 	})
 	defer store.Close()
 
@@ -40,7 +40,7 @@ func TestThinkingStoreGetTouchesExactEntry(t *testing.T) {
 }
 
 func TestThinkingStorePersistsAcrossRestart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "thinking-store.json")
+	path := filepath.Join(t.TempDir(), "thinking-store.db")
 	cfg := ThinkingStoreConfig{
 		MaxEntries:      10,
 		EntryTTLMinutes: 60,

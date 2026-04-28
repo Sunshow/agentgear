@@ -71,9 +71,9 @@ type ThinkingStore struct {
 }
 
 type ThinkingStoreConfig struct {
-    MaxEntries      int    // 最大条目数，默认 5000
+    MaxEntries      int    // 最大条目数，默认 50000
     EntryTTLMinutes int    // 条目过期时间，默认 1440 分钟（24 小时）
-    PersistPath     string // 持久化快照路径，默认 ./data/thinking_store.json
+    PersistPath     string // bbolt 持久化路径，默认 ./data/thinking_store.db
 }
 ```
 
@@ -84,10 +84,10 @@ type ThinkingStoreConfig struct {
 
 ### 缓存生命周期
 
-- 默认会将快照持久化到 `./data/thinking_store.json`
+- 默认会将快照增量持久化到 `./data/thinking_store.db`（bbolt）
 - 启动时自动加载持久化快照，关闭时强制 flush
-- 运行中采用 debounce 原子刷盘（临时文件 + rename），访问时间只按粗粒度同步到磁盘，避免命中请求触发高频全量重写
-- TTL 默认 24 小时，最多 5000 条，自动过期淘汰
+- 运行中采用 debounce 批量提交，命中请求只按粗粒度同步访问时间，避免高频写盘
+- TTL 默认 24 小时，最多 50000 条，自动过期淘汰
 - 命中条目会刷新访问时间，避免长会话中仍在使用的旧 assistant 快照被过早淘汰
 
 ## 匹配策略
