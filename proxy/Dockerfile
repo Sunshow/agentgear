@@ -22,7 +22,7 @@ FROM alpine:3.19
 WORKDIR /app
 
 # Install ca-certificates for HTTPS
-RUN apk add --no-cache ca-certificates tzdata wget
+RUN apk add --no-cache ca-certificates tzdata wget curl
 
 # Create non-root user
 RUN adduser -D -u 1000 agentgear
