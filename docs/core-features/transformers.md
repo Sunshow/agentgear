@@ -157,6 +157,57 @@ transformers:
       transformer: "my_cache_strip"
 ```
 
+## cache_dedup 类型：缓存 Token 去重（修正上游重复计算）
+
+用于修正某些上游在 `usage` 中重复计算缓存 token 的问题。这些上游返回的 `input_tokens` 已经包含了缓存命中的 token，但同时又通过 `cache_read_input_tokens` 单独列出，导致下游按标准公式 `input_tokens * input_price + cache_read_input_tokens * cache_price` 计费时发生重复扣费。
+
+### 典型现象
+
+上游返回 `input_tokens=24336, cache_read_input_tokens=24256`（input 中已含 cache），标准中转按：
+
+```
+(输入 24336 * $8 + 缓存 24256 * $2 + 输出 134 * $28) * 0.5
+```
+
+但实际应当只有 80 个非缓存输入 token（24336 - 24256 = 80）。
+
+### 转换逻辑
+
+对响应中的 `usage` 对象执行以下操作：
+
+```
+# 仅当 input_tokens >= cache_read + cache_creation 时生效（保护原生 Anthropic 语义）
+input_tokens = input_tokens - cache_read_input_tokens - cache_creation_input_tokens
+# cache_read_input_tokens 与 cache_creation_input_tokens 保持不变
+```
+
+当 `input_tokens < cache_read + cache_creation` 时（Anthropic 原生语义，input 不含 cache），转换器跳过不做修改，避免误伤。
+
+### 作用范围
+
+- 流式响应：`message_start` 事件中的 `message.usage` 和 `message_delta` 事件中的 `usage`
+- 非流式响应：响应体顶层 `usage` 字段
+
+### 内置实例
+
+- `$cache_dedup`：内置定义，type=cache_dedup, direction=response
+- `$cache_dedup_mapping`：内置 mapping，**默认 disabled**，用户启用即可（可按需加 tags/ExcludeTags 限定范围）
+
+```yaml
+# 启用内置 mapping 的示例：覆盖为 enabled 并限定 tags
+transformers:
+  mappings:
+    - name: "$cache_dedup_mapping"
+      enabled: true
+      tags: ["$u_some_upstream"]   # 替换为实际有此问题的上游标签
+```
+
+### 注意事项
+
+- `cache_dedup` 与 `cache_strip` 不要对同一请求同时启用：cache_dedup 保留 cache 字段、cache_strip 清零 cache 字段，叠加无意义
+- 若下游 Agent 完全不感知 cache 概念（按总 input 计费），改用 `cache_strip` 更合适
+- 启用前建议对照单次请求的计费日志核对是否真的存在重复（即 input 是否已经包含 cache 部分）
+
 ## 详细设计文档
 
 - [模板化转换器设计](../模板化转换器设计.md) - 转换器模板化设计方案

@@ -295,6 +295,15 @@ Read the complete conversation and generate a structured summary according to th
 		Direction:   "request",
 		Builtin:     true,
 	},
+
+	// === 缓存 Token 去重转换器 ===
+	{
+		Name:        "$cache_dedup",
+		Description: "修正上游 usage 重复计算：从 input_tokens 中减去 cache_read+cache_creation（保留 cache 字段不动）",
+		Type:        "cache_dedup",
+		Direction:   "response",
+		Builtin:     true,
+	},
 }
 
 // BuiltinMappings defines built-in mapping rules
@@ -397,6 +406,14 @@ var BuiltinMappings = []MappingRule{
 		Enabled:     true,
 		Tags:        []string{"$a_droid", "$u_kiro"},
 		Transformer: "$droid_upstream_kiro_force_compress",
+		Builtin:     true,
+	},
+	// cache_dedup: 修正上游缓存 token 重复计算（默认 disabled，用户按需启用）
+	{
+		Name:        "$cache_dedup_mapping",
+		Description: "修正上游 usage 重复计算：从 input_tokens 中减去 cache tokens（默认禁用，对重复计费的上游启用）",
+		Enabled:     false,
+		Transformer: "$cache_dedup",
 		Builtin:     true,
 	},
 }

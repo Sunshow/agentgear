@@ -396,6 +396,54 @@ transformers:
     #   tags: []
     #   transformer: "$preserve_thinking_blocks"
 
+    # === Type: cache_strip (缓存 Token 擦除) ===
+    # Merges cache_read_input_tokens + cache_creation_input_tokens into input_tokens,
+    # then zeros out the cache fields. Use this when the downstream agent should NOT
+    # perceive cache hits at all (e.g. it bills purely by total input_tokens).
+    #
+    # Logic:
+    #   input_tokens = input_tokens + cache_read + cache_creation
+    #   cache_read_input_tokens = 0
+    #   cache_creation_input_tokens = 0
+    #
+    # Scope: streaming message_start/message_delta and non-streaming response usage.
+    #
+    # Example: custom definition (usually just enable the builtin mapping below)
+    # - name: "my_cache_strip"
+    #   description: "Strip cache tokens from usage"
+    #   type: "cache_strip"
+    #   direction: "response"            # cache_strip only supports "response"
+
+    # === Type: cache_dedup (缓存 Token 去重) ===
+    # Fixes upstreams that double-count cached tokens by reporting an input_tokens
+    # value that ALREADY INCLUDES the cache portion, while also listing it separately
+    # via cache_read_input_tokens. Without dedup, a standards-compliant relay would
+    # bill the cached tokens twice (once in input_tokens, once in cache_read).
+    #
+    # Symptom example:
+    #   Upstream returns: input_tokens=24336, cache_read_input_tokens=24256
+    #   (the real non-cached input is only 24336 - 24256 = 80 tokens)
+    #   Relay bills: (24336 * $8 + 24256 * $2 + 134 * $28) * group_ratio
+    #   Correct billing should use input_tokens=80 instead of 24336.
+    #
+    # Logic (only when input_tokens >= cache_read + cache_creation):
+    #   input_tokens = input_tokens - cache_read_input_tokens - cache_creation_input_tokens
+    #   # cache_read_input_tokens and cache_creation_input_tokens are PRESERVED
+    #
+    # Safety: when input_tokens < cache total (Anthropic native semantics where input
+    # does NOT include cache), the transformer skips to avoid corrupting valid usage.
+    #
+    # Scope: streaming message_start/message_delta and non-streaming response usage.
+    #
+    # IMPORTANT: do NOT enable cache_dedup and cache_strip for the same request.
+    # cache_dedup keeps cache fields; cache_strip zeroes them. Stacking is pointless.
+    #
+    # Example: custom definition (usually just enable the builtin mapping below)
+    # - name: "my_cache_dedup"
+    #   description: "Fix upstream cache double-counting"
+    #   type: "cache_dedup"
+    #   direction: "response"            # cache_dedup only supports "response"
+
   # Mapping rules (bind transformers to conditions)
   mappings:
     # Example: Apply transformer for Droid agent via WARP gateway
@@ -451,4 +499,23 @@ transformers:
     #   enabled: true
     #   tags: ["$a_cursor", "$u_kiro"]
     #   transformer: "cursor_kiro_force_compress"
+
+    # Example: Enable builtin $cache_strip (erase cache fields, merge into input)
+    # Use when the downstream agent should not perceive cache hits at all.
+    # - name: "$cache_strip_mapping"
+    #   enabled: true
+    #   tags: ["$a_droid"]              # Narrow to specific agent/upstream as needed
+    #   transformer: "$cache_strip"
+
+    # Example: Enable builtin $cache_dedup (fix upstream cache double-counting)
+    # The builtin mapping is disabled by default. Override it with enabled: true
+    # and add tags to scope it to the upstream that reports double-counted usage.
+    # Verify against a single billing log entry before enabling globally.
+    # Do NOT stack with cache_strip on the same request.
+    # - name: "$cache_dedup_mapping"
+    #   description: "Fix upstream cache double-counting for problematic channel"
+    #   enabled: true
+    #   tags: ["$u_xxx"]                # Replace with the upstream tag that double-counts
+    #   transformer: "$cache_dedup"
+
 

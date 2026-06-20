@@ -1208,6 +1208,13 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 				reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, cacheStripDef.Name)
 			}
 		}
+		if cacheDedupDef := h.transformerRegistry.GetCacheDedupTransformer(reqCtx.tags); cacheDedupDef != nil {
+			if deduped, modified := transformer.DedupCacheFromResponse(respBody, h.businessLogger); modified {
+				respBody = deduped
+				h.businessLogger.Info("cache_dedup applied to non-streaming response", zap.String("transformer", cacheDedupDef.Name))
+				reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, cacheDedupDef.Name)
+			}
+		}
 	}
 
 	// Thinking preserve: cache non-streaming JSON responses too.
@@ -1374,6 +1381,12 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		cacheStripDef = h.transformerRegistry.GetCacheStripTransformer(reqCtx.tags)
 	}
 
+	// Initialize cache dedup transformer
+	var cacheDedupDef *transformer.TransformerDef
+	if h.transformerRegistry != nil {
+		cacheDedupDef = h.transformerRegistry.GetCacheDedupTransformer(reqCtx.tags)
+	}
+
 	writeEvents := func(events []sseEvent) {
 		for _, evt := range events {
 			outLine := fmt.Sprintf("event: %s\ndata: %s\n\n", evt.eventType, evt.data)
@@ -1427,7 +1440,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 					}
 				}
 
-				outputEvents := h.processSSEEvent(eventType, data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers, cacheStripDef)
+				outputEvents := h.processSSEEvent(eventType, data, toolBlocks, &nextOutputIndex, &accumulator, &pendingMessageDelta, writeEvents, reqCtx.tags, reqCtx, contentReplacerDefs, textBlockReplacers, adRemoverDefs, textBlockAdRemovers, cacheStripDef, cacheDedupDef)
 				writeEvents(outputEvents)
 			}
 			_, _ = reader.ReadString('\n')
@@ -1666,7 +1679,7 @@ type sseEvent struct {
 	data      string
 }
 
-func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, pendingMessageDelta **sseEvent, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext, contentReplacerDefs []*transformer.TransformerDef, textBlockReplacers map[int][]*transformer.ContentReplacer, adRemoverDefs []*transformer.TransformerDef, textBlockAdRemovers map[int][]*transformer.AdRemover, cacheStripDef *transformer.TransformerDef) []sseEvent {
+func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*toolBlockState, nextOutputIndex *int, accumulator **toolBlockAccumulator, pendingMessageDelta **sseEvent, writeEvents func([]sseEvent), tags []string, reqCtx *requestContext, contentReplacerDefs []*transformer.TransformerDef, textBlockReplacers map[int][]*transformer.ContentReplacer, adRemoverDefs []*transformer.TransformerDef, textBlockAdRemovers map[int][]*transformer.AdRemover, cacheStripDef *transformer.TransformerDef, cacheDedupDef *transformer.TransformerDef) []sseEvent {
 	switch eventType {
 	case "message_start":
 		if cacheStripDef != nil {
@@ -1675,6 +1688,15 @@ func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*to
 				h.businessLogger.Info("cache_strip applied to message_start", zap.String("transformer", cacheStripDef.Name))
 				if reqCtx != nil {
 					reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, cacheStripDef.Name)
+				}
+			}
+		}
+		if cacheDedupDef != nil {
+			if deduped, modified := transformer.DedupCacheFromMessageStart(data, h.businessLogger); modified {
+				data = deduped
+				h.businessLogger.Info("cache_dedup applied to message_start", zap.String("transformer", cacheDedupDef.Name))
+				if reqCtx != nil {
+					reqCtx.appliedTransformers = append(reqCtx.appliedTransformers, cacheDedupDef.Name)
 				}
 			}
 		}
@@ -1689,6 +1711,11 @@ func (h *Handler) processSSEEvent(eventType, data string, toolBlocks map[int]*to
 		if cacheStripDef != nil {
 			if stripped, modified := transformer.StripCacheFromMessageDelta(data, h.businessLogger); modified {
 				data = stripped
+			}
+		}
+		if cacheDedupDef != nil {
+			if deduped, modified := transformer.DedupCacheFromMessageDelta(data, h.businessLogger); modified {
+				data = deduped
 			}
 		}
 		// Cache message_delta, send it before message_stop

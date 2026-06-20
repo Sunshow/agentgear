@@ -952,3 +952,27 @@ func (r *Registry) GetCompressTransformer(tags []string) *TransformerDef {
 	}
 	return nil
 }
+
+// GetCacheDedupTransformer returns the first cache_dedup type transformer that matches the given tags.
+// cache_dedup subtracts cache tokens from input_tokens to fix upstream double-counting.
+func (r *Registry) GetCacheDedupTransformer(tags []string) *TransformerDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
+			continue
+		}
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Type == "cache_dedup" && d.Direction == "response" {
+				return d
+			}
+		}
+	}
+	return nil
+}
