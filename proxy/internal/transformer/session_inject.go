@@ -10,6 +10,12 @@ import (
 	"go.uber.org/zap"
 )
 
+type sessionMatchResult struct {
+	sessionID  string
+	source     string // "new" or "matched"
+	matchDepth int    // number of messages matched (0 for new sessions)
+}
+
 // SessionInjector handles session identification via content hashing
 // and injects a consistent session ID into upstream requests.
 type SessionInjector struct {
@@ -30,21 +36,29 @@ func (si *SessionInjector) Inject(reqBody []byte, proxyReq *http.Request) bool {
 		return false
 	}
 
-	sid := si.resolveSessionID(reqBody)
-	if sid == "" {
+	result := si.resolveSessionID(reqBody)
+	if result.sessionID == "" {
 		return false
 	}
 
-	proxyReq.Header.Set("X-Claude-Code-Session-Id", sid)
-	si.logger.Info("session_inject: injected session id",
-		zap.String("session_id", sid[:8]))
+	proxyReq.Header.Set("X-Claude-Code-Session-Id", result.sessionID)
+
+	if result.source == "matched" {
+		si.logger.Info("session_inject: matched existing session",
+			zap.String("session_id", result.sessionID),
+			zap.Int("match_depth", result.matchDepth))
+	} else {
+		si.logger.Info("session_inject: created new session",
+			zap.String("session_id", result.sessionID),
+			zap.Int("prefix_depth", result.matchDepth))
+	}
 	return true
 }
 
-func (si *SessionInjector) resolveSessionID(reqBody []byte) string {
+func (si *SessionInjector) resolveSessionID(reqBody []byte) sessionMatchResult {
 	var req map[string]interface{}
 	if err := json.Unmarshal(reqBody, &req); err != nil {
-		return ""
+		return sessionMatchResult{}
 	}
 
 	// Build content array: system text + all messages
@@ -56,7 +70,7 @@ func (si *SessionInjector) resolveSessionID(reqBody []byte) string {
 
 	messages, _ := req["messages"].([]interface{})
 	if messages == nil {
-		return ""
+		return sessionMatchResult{}
 	}
 
 	fullPrefix := make([]interface{}, len(prefix)+len(messages))
@@ -72,7 +86,11 @@ func (si *SessionInjector) resolveSessionID(reqBody []byte) string {
 			// Store the current (longer) prefix for future lookups
 			currentHash := HashMessagesPrefix(fullPrefix)
 			si.store.PutSession(currentHash, sid)
-			return sid
+			return sessionMatchResult{
+				sessionID:  sid,
+				source:     "matched",
+				matchDepth: n,
+			}
 		}
 	}
 
@@ -85,7 +103,11 @@ func (si *SessionInjector) resolveSessionID(reqBody []byte) string {
 		si.store.PutSession(hash, newSID)
 	}
 
-	return newSID
+	return sessionMatchResult{
+		sessionID:  newSID,
+		source:     "new",
+		matchDepth: len(fullPrefix),
+	}
 }
 
 // extractSystemText extracts the system prompt as a plain string from the request body.

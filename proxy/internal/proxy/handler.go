@@ -399,7 +399,8 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 		for _, def := range defs {
 			if h.sessionInjector.Inject(transformedReqBody, proxyReq) {
 				h.businessLogger.Info("session_inject applied",
-					zap.String("transformer", def.Name))
+					zap.String("transformer", def.Name),
+					zap.String("session_id", proxyReq.Header.Get("X-Claude-Code-Session-Id")))
 			}
 		}
 	}
