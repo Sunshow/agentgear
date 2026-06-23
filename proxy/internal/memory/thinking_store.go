@@ -40,18 +40,26 @@ func DefaultThinkingStoreConfig() ThinkingStoreConfig {
 	}
 }
 
+type sessionEntry struct {
+	SessionID string    `json:"session_id"`
+	CachedAt  time.Time `json:"cached_at"`
+}
+
 type ThinkingStore struct {
-	mu             sync.RWMutex
-	entries        map[string]*ThinkingEntry
-	pendingUpserts map[string]*ThinkingEntry
-	pendingDeletes map[string]struct{}
-	config         ThinkingStoreConfig
-	db             *bolt.DB
-	stopCleanup    chan struct{}
-	stopPersist    chan struct{}
-	persistDirty   chan struct{}
-	persistDone    chan struct{}
-	closeOnce      sync.Once
+	mu                    sync.RWMutex
+	entries               map[string]*ThinkingEntry
+	pendingUpserts        map[string]*ThinkingEntry
+	pendingDeletes        map[string]struct{}
+	sessionEntries        map[string]*sessionEntry
+	pendingSessionUpserts map[string]*sessionEntry
+	pendingSessionDeletes map[string]struct{}
+	config                ThinkingStoreConfig
+	db                    *bolt.DB
+	stopCleanup           chan struct{}
+	stopPersist           chan struct{}
+	persistDirty          chan struct{}
+	persistDone           chan struct{}
+	closeOnce             sync.Once
 }
 
 type persistedThinkingEntry struct {
@@ -61,9 +69,11 @@ type persistedThinkingEntry struct {
 
 const (
 	thinkingStoreBucketName           = "thinking_entries"
+	sessionMapBucketName              = "session_map"
 	thinkingStorePersistDebounce      = time.Second
 	thinkingStoreTouchPersistInterval = 5 * time.Minute
 	thinkingStoreDBTimeout            = time.Second
+	sessionMapTTLMinutes              = 24 * 60
 )
 
 func NewThinkingStore(cfg ThinkingStoreConfig) *ThinkingStore {
@@ -75,14 +85,17 @@ func NewThinkingStore(cfg ThinkingStoreConfig) *ThinkingStore {
 	}
 
 	s := &ThinkingStore{
-		entries:        make(map[string]*ThinkingEntry),
-		pendingUpserts: make(map[string]*ThinkingEntry),
-		pendingDeletes: make(map[string]struct{}),
-		config:         cfg,
-		stopCleanup:    make(chan struct{}),
-		stopPersist:    make(chan struct{}),
-		persistDirty:   make(chan struct{}, 1),
-		persistDone:    make(chan struct{}),
+		entries:               make(map[string]*ThinkingEntry),
+		pendingUpserts:        make(map[string]*ThinkingEntry),
+		pendingDeletes:        make(map[string]struct{}),
+		sessionEntries:        make(map[string]*sessionEntry),
+		pendingSessionUpserts: make(map[string]*sessionEntry),
+		pendingSessionDeletes: make(map[string]struct{}),
+		config:                cfg,
+		stopCleanup:           make(chan struct{}),
+		stopPersist:           make(chan struct{}),
+		persistDirty:          make(chan struct{}, 1),
+		persistDone:           make(chan struct{}),
 	}
 
 	if err := s.openDB(); err != nil {
@@ -204,6 +217,14 @@ func (s *ThinkingStore) cleanupExpired() {
 			s.queueDeleteLocked(key)
 		}
 	}
+
+	sessionTTL := time.Duration(sessionMapTTLMinutes) * time.Minute
+	for key, entry := range s.sessionEntries {
+		if now.Sub(entry.CachedAt) > sessionTTL {
+			delete(s.sessionEntries, key)
+			s.queueSessionDeleteLocked(key)
+		}
+	}
 }
 
 func (s *ThinkingStore) Close() {
@@ -223,6 +244,70 @@ func (s *ThinkingStore) Size() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.entries)
+}
+
+// GetSession looks up a session ID by prefix hash. Returns empty string if not found or expired.
+func (s *ThinkingStore) GetSession(prefixHash string) string {
+	if prefixHash == "" {
+		return ""
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	ttl := time.Duration(sessionMapTTLMinutes) * time.Minute
+
+	if entry, ok := s.sessionEntries[prefixHash]; ok {
+		if now.Sub(entry.CachedAt) <= ttl {
+			entry.CachedAt = now
+			s.queueSessionUpsertLocked(prefixHash, entry)
+			return entry.SessionID
+		}
+		delete(s.sessionEntries, prefixHash)
+		s.queueSessionDeleteLocked(prefixHash)
+	}
+	return ""
+}
+
+// PutSession stores a session ID keyed by prefix hash.
+func (s *ThinkingStore) PutSession(prefixHash, sessionID string) {
+	if prefixHash == "" || sessionID == "" {
+		return
+	}
+
+	now := time.Now()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry := &sessionEntry{
+		SessionID: sessionID,
+		CachedAt:  now,
+	}
+	s.sessionEntries[prefixHash] = entry
+	s.queueSessionUpsertLocked(prefixHash, entry)
+}
+
+func (s *ThinkingStore) queueSessionUpsertLocked(key string, entry *sessionEntry) {
+	if s.db == nil {
+		return
+	}
+	delete(s.pendingSessionDeletes, key)
+	s.pendingSessionUpserts[key] = &sessionEntry{
+		SessionID: entry.SessionID,
+		CachedAt:  entry.CachedAt,
+	}
+	s.markDirty()
+}
+
+func (s *ThinkingStore) queueSessionDeleteLocked(key string) {
+	if s.db == nil {
+		return
+	}
+	delete(s.pendingSessionUpserts, key)
+	s.pendingSessionDeletes[key] = struct{}{}
+	s.markDirty()
 }
 
 func (s *ThinkingStore) persistLoop() {
@@ -281,15 +366,15 @@ func (s *ThinkingStore) persistLoop() {
 }
 
 func (s *ThinkingStore) flushPending() error {
-	upserts, deletes := s.drainPending()
-	if len(upserts) == 0 && len(deletes) == 0 {
+	upserts, deletes, sessUpserts, sessDeletes := s.drainPending()
+	if len(upserts) == 0 && len(deletes) == 0 && len(sessUpserts) == 0 && len(sessDeletes) == 0 {
 		return nil
 	}
 
 	err := s.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(thinkingStoreBucketName))
+		thinkBucket := tx.Bucket([]byte(thinkingStoreBucketName))
 		for key := range deletes {
-			if err := bucket.Delete([]byte(key)); err != nil {
+			if err := thinkBucket.Delete([]byte(key)); err != nil {
 				return err
 			}
 		}
@@ -298,14 +383,30 @@ func (s *ThinkingStore) flushPending() error {
 			if err != nil {
 				return err
 			}
-			if err := bucket.Put([]byte(key), payload); err != nil {
+			if err := thinkBucket.Put([]byte(key), payload); err != nil {
+				return err
+			}
+		}
+
+		sessBucket := tx.Bucket([]byte(sessionMapBucketName))
+		for key := range sessDeletes {
+			if err := sessBucket.Delete([]byte(key)); err != nil {
+				return err
+			}
+		}
+		for key, entry := range sessUpserts {
+			payload, err := json.Marshal(entry)
+			if err != nil {
+				return err
+			}
+			if err := sessBucket.Put([]byte(key), payload); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		s.requeuePending(upserts, deletes)
+		s.requeuePending(upserts, deletes, sessUpserts, sessDeletes)
 		return err
 	}
 
@@ -323,18 +424,22 @@ func (s *ThinkingStore) flushPending() error {
 	return nil
 }
 
-func (s *ThinkingStore) drainPending() (map[string]*ThinkingEntry, map[string]struct{}) {
+func (s *ThinkingStore) drainPending() (map[string]*ThinkingEntry, map[string]struct{}, map[string]*sessionEntry, map[string]struct{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	upserts := s.pendingUpserts
 	deletes := s.pendingDeletes
+	sessUpserts := s.pendingSessionUpserts
+	sessDeletes := s.pendingSessionDeletes
 	s.pendingUpserts = make(map[string]*ThinkingEntry)
 	s.pendingDeletes = make(map[string]struct{})
-	return upserts, deletes
+	s.pendingSessionUpserts = make(map[string]*sessionEntry)
+	s.pendingSessionDeletes = make(map[string]struct{})
+	return upserts, deletes, sessUpserts, sessDeletes
 }
 
-func (s *ThinkingStore) requeuePending(upserts map[string]*ThinkingEntry, deletes map[string]struct{}) {
+func (s *ThinkingStore) requeuePending(upserts map[string]*ThinkingEntry, deletes map[string]struct{}, sessUpserts map[string]*sessionEntry, sessDeletes map[string]struct{}) {
 	s.mu.Lock()
 	for key, entry := range upserts {
 		delete(s.pendingDeletes, key)
@@ -343,6 +448,17 @@ func (s *ThinkingStore) requeuePending(upserts map[string]*ThinkingEntry, delete
 	for key := range deletes {
 		delete(s.pendingUpserts, key)
 		s.pendingDeletes[key] = struct{}{}
+	}
+	for key, entry := range sessUpserts {
+		delete(s.pendingSessionDeletes, key)
+		s.pendingSessionUpserts[key] = &sessionEntry{
+			SessionID: entry.SessionID,
+			CachedAt:  entry.CachedAt,
+		}
+	}
+	for key := range sessDeletes {
+		delete(s.pendingSessionUpserts, key)
+		s.pendingSessionDeletes[key] = struct{}{}
 	}
 	s.mu.Unlock()
 	s.markDirty()
@@ -365,8 +481,13 @@ func (s *ThinkingStore) openDB() error {
 	}
 
 	if err := db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(thinkingStoreBucketName))
-		return err
+		if _, err := tx.CreateBucketIfNotExists([]byte(thinkingStoreBucketName)); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(sessionMapBucketName)); err != nil {
+			return err
+		}
+		return nil
 	}); err != nil {
 		_ = db.Close()
 		return err
@@ -383,6 +504,7 @@ func (s *ThinkingStore) loadPersisted() {
 
 	now := time.Now()
 	ttl := s.entryTTL()
+	sessionTTL := time.Duration(sessionMapTTLMinutes) * time.Minute
 	loaded := make([]persistedThinkingEntry, 0)
 	staleKeys := make([]string, 0)
 
@@ -426,12 +548,47 @@ func (s *ThinkingStore) loadPersisted() {
 		s.entries[item.Key] = item.Entry
 	}
 
-	if len(staleKeys) > 0 {
+	// Load session entries
+	sessStaleKeys := make([]string, 0)
+	if err := s.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(sessionMapBucketName))
+		if bucket == nil {
+			return nil
+		}
+		return bucket.ForEach(func(key, value []byte) error {
+			var entry sessionEntry
+			if err := json.Unmarshal(value, &entry); err != nil {
+				sessStaleKeys = append(sessStaleKeys, string(append([]byte(nil), key...)))
+				return nil
+			}
+			if entry.SessionID == "" || now.Sub(entry.CachedAt) > sessionTTL {
+				sessStaleKeys = append(sessStaleKeys, string(append([]byte(nil), key...)))
+				return nil
+			}
+			s.sessionEntries[string(append([]byte(nil), key...))] = &sessionEntry{
+				SessionID: entry.SessionID,
+				CachedAt:  entry.CachedAt,
+			}
+			return nil
+		})
+	}); err != nil {
+		log.Printf("thinking_store: failed to load session entries: %v", err)
+	}
+
+	if len(staleKeys) > 0 || len(sessStaleKeys) > 0 {
 		if err := s.db.Update(func(tx *bolt.Tx) error {
-			bucket := tx.Bucket([]byte(thinkingStoreBucketName))
+			thinkBucket := tx.Bucket([]byte(thinkingStoreBucketName))
 			for _, key := range staleKeys {
-				if err := bucket.Delete([]byte(key)); err != nil {
+				if err := thinkBucket.Delete([]byte(key)); err != nil {
 					return err
+				}
+			}
+			sessBucket := tx.Bucket([]byte(sessionMapBucketName))
+			if sessBucket != nil {
+				for _, key := range sessStaleKeys {
+					if err := sessBucket.Delete([]byte(key)); err != nil {
+						return err
+					}
 				}
 			}
 			return nil

@@ -45,6 +45,7 @@ type Handler struct {
 	transformerRegistry *transformer.Registry
 	wsHub               *api.WSHub
 	thinkingPreserver   *transformer.ThinkingPreserver
+	sessionInjector     *transformer.SessionInjector
 }
 
 type Config struct {
@@ -95,6 +96,7 @@ func NewHandler(cfg Config) *Handler {
 	// Initialize thinking preserver if store is available
 	if cfg.ThinkingStore != nil {
 		h.thinkingPreserver = transformer.NewThinkingPreserver(cfg.ThinkingStore, businessLogger)
+		h.sessionInjector = transformer.NewSessionInjector(cfg.ThinkingStore, businessLogger)
 	}
 
 	return h
@@ -390,6 +392,17 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 
 	// Apply request header injections from transformers
 	h.applyRequestHeaderInjections(proxyReq, tags, reqCtx)
+
+	// Apply session_inject transformers (content-based session ID)
+	if h.sessionInjector != nil && h.transformerRegistry != nil {
+		defs := h.transformerRegistry.GetSessionInjectTransformers(tags)
+		for _, def := range defs {
+			if h.sessionInjector.Inject(transformedReqBody, proxyReq) {
+				h.businessLogger.Info("session_inject applied",
+					zap.String("transformer", def.Name))
+			}
+		}
+	}
 
 	isStreaming := h.isStreamingRequest(reqBody)
 

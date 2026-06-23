@@ -976,3 +976,28 @@ func (r *Registry) GetCacheDedupTransformer(tags []string) *TransformerDef {
 	}
 	return nil
 }
+
+// GetSessionInjectTransformers returns all session_inject type transformers matching tags.
+func (r *Registry) GetSessionInjectTransformers(tags []string) []*TransformerDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []*TransformerDef
+	for i := range r.mappings {
+		m := &r.mappings[i]
+		if !m.Enabled {
+			continue
+		}
+		if !r.matchTags(m.Tags, m.ExcludeTags, tags) {
+			continue
+		}
+		for j := range r.definitions {
+			d := &r.definitions[j]
+			if d.Name == m.Transformer && d.Type == "session_inject" && d.Direction == "request" {
+				result = append(result, d)
+				break
+			}
+		}
+	}
+	return result
+}

@@ -304,6 +304,13 @@ Read the complete conversation and generate a structured summary according to th
 		Direction:   "response",
 		Builtin:     true,
 	},
+	{
+		Name:        "$inject_session_id",
+		Description: "通过请求内容渐进前缀哈希识别会话，向上游注入 X-Claude-Code-Session-Id 以利用 prompt caching",
+		Type:        "session_inject",
+		Direction:   "request",
+		Builtin:     true,
+	},
 }
 
 // BuiltinMappings defines built-in mapping rules

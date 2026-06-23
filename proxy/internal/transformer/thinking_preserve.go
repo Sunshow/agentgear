@@ -175,6 +175,17 @@ func hashRequestMessages(body []byte) string {
 	return hashNormalized(messages)
 }
 
+// HashMessagesPrefix computes a content hash for a sequence of messages (prefix of the conversation).
+// Excludes cache_control fields for consistent hashing across requests.
+func HashMessagesPrefix(messages []interface{}) string {
+	return hashNormalized(messages)
+}
+
+// HashString computes a content hash for an arbitrary string.
+func HashString(s string) string {
+	return hashNormalized(s)
+}
+
 func hashVisibleContent(content interface{}) (string, bool) {
 	visible, hasVisible := stripThinkingContent(content)
 	if !hasVisible {
