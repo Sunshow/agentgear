@@ -397,7 +397,17 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 	if h.sessionInjector != nil && h.transformerRegistry != nil {
 		defs := h.transformerRegistry.GetSessionInjectTransformers(tags)
 		for _, def := range defs {
-			if h.sessionInjector.Inject(transformedReqBody, proxyReq) {
+			newBody, ok := h.sessionInjector.Inject(transformedReqBody, proxyReq)
+			if ok {
+				if !bytes.Equal(newBody, transformedReqBody) {
+					transformedReqBody = newBody
+					reqCtx.transformedReqBody = newBody
+					if connInfo != nil {
+						connInfo.TransformedRequest = true
+						connInfo.TransformedRequestBody = newBody
+						connInfo.AppliedRequestTransformers = append(connInfo.AppliedRequestTransformers, "session_inject:"+def.Name)
+					}
+				}
 				h.businessLogger.Info("session_inject applied",
 					zap.String("transformer", def.Name),
 					zap.String("session_id", proxyReq.Header.Get("X-Claude-Code-Session-Id")))
