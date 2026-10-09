@@ -3,8 +3,8 @@ package proxy
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -165,12 +165,30 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 	sessionID, sequence := h.getOrCreateSession(c)
 	c.Header("X-Session-Id", sessionID)
 
-	reqBody, err := io.ReadAll(c.Request.Body)
+	requestReader, closeDecoders, err := decodedBodyReader(c.Request.Body, c.Request.Header)
+	if err != nil {
+		h.businessLogger.Error("failed to decode request body", zap.Error(err))
+		status := http.StatusBadRequest
+		if errors.Is(err, errUnsupportedContentEncoding) {
+			status = http.StatusUnsupportedMediaType
+			c.Header("Accept-Encoding", supportedContentEncodings)
+		}
+		c.JSON(status, gin.H{"error": "failed to decode request body"})
+		return
+	}
+	reqBody, err := io.ReadAll(requestReader)
+	closeDecoders()
 	if err != nil {
 		h.businessLogger.Error("failed to read request body", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
 		return
 	}
+	if encoding := c.Request.Header.Get("Content-Encoding"); encoding != "" {
+		h.businessLogger.Info("request body decompressed",
+			zap.String("content_encoding", encoding), zap.Int("decoded_size", len(reqBody)))
+	}
+	clearBodyEncodingHeaders(c.Request.Header)
+	c.Request.ContentLength = int64(len(reqBody))
 
 	// Match tags using tagging engine
 	var tags []string
@@ -390,6 +408,8 @@ func (h *Handler) ProxyRequest(c *gin.Context) {
 		}
 	}
 
+	// AgentGear decodes upstream responses before parsing or transforming them.
+	proxyReq.Header.Set("Accept-Encoding", supportedContentEncodings)
 	// Apply request header injections from transformers
 	h.applyRequestHeaderInjections(proxyReq, tags, reqCtx)
 
@@ -1158,31 +1178,28 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	var respBody []byte
+	responseReader, closeDecoders, err := decodedResponseBodyReader(resp)
+	if err == nil {
+		defer closeDecoders()
+		respBody, err = io.ReadAll(responseReader)
+	}
 	if err != nil {
-		h.businessLogger.Error("failed to read response body", zap.Error(err))
-		reqCtx.meta.Error = err.Error()
-		reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
-		reqCtx.forceLog = true // 读取失败，强制记录
-		h.updateConnectionStatus(reqCtx.connInfo, "error", reqCtx.meta.DurationMs)
-		h.saveLog(reqCtx)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read response body"})
+		h.handleResponseReadError(c, reqCtx, startTime, err)
 		return
 	}
-
 	reqCtx.meta.Response = &ResponseMeta{
 		Status:  resp.StatusCode,
 		Headers: sanitizeHeaders(resp.Header),
 	}
-	decompressedBody := decompressIfNeeded(respBody, resp.Header)
-	reqCtx.respBody = decompressedBody
+	reqCtx.respBody = respBody
 	reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
 
 	// 设置强制记录标记（非200响应或200但body为空）
-	reqCtx.forceLog = h.shouldForceLog(resp.StatusCode, len(decompressedBody), false)
+	reqCtx.forceLog = h.shouldForceLog(resp.StatusCode, len(respBody), false)
 
 	// 检查是否需要转换为上下文超限错误
-	if handler := h.shouldTransformToContextError(reqCtx, resp.StatusCode, len(decompressedBody)); handler != nil {
+	if handler := h.shouldTransformToContextError(reqCtx, resp.StatusCode, len(respBody)); handler != nil {
 		h.updateConnectionStatus(reqCtx.connInfo, "error_transformed", reqCtx.meta.DurationMs)
 		h.saveLog(reqCtx)
 		h.writeContextLengthError(c, handler, len(reqCtx.reqBody))
@@ -1190,7 +1207,7 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 	}
 
 	// 检查错误响应体是否匹配已配置的错误模式（如 input too long）
-	if handler := h.shouldTransformToPatternError(reqCtx, resp.StatusCode, decompressedBody); handler != nil {
+	if handler := h.shouldTransformToPatternError(reqCtx, resp.StatusCode, respBody); handler != nil {
 		h.updateConnectionStatus(reqCtx.connInfo, "error_transformed", reqCtx.meta.DurationMs)
 		h.saveLog(reqCtx)
 		h.writeContextLengthError(c, handler, len(reqCtx.reqBody))
@@ -1205,7 +1222,7 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 			c.EndTime = time.Now()
 			c.ResponseStatus = resp.StatusCode
 			c.ResponseHeaders = flattenHeaders(resp.Header)
-			c.ResponseBody = decompressedBody
+			c.ResponseBody = respBody
 		})
 		if h.wsHub != nil {
 			h.wsHub.Broadcast(reqCtx.connInfo)
@@ -1245,11 +1262,22 @@ func (h *Handler) handleNormalResponse(c *gin.Context, proxyReq *http.Request, r
 	if h.thinkingPreserver != nil && h.transformerRegistry != nil && resp.StatusCode == 200 {
 		if def := h.transformerRegistry.GetThinkingPreserveTransformer(reqCtx.tags); def != nil {
 			_ = def
-			h.cacheThinkingBlocksFromJSON(reqCtx.transformedReqBody, decompressedBody)
+			h.cacheThinkingBlocksFromJSON(reqCtx.transformedReqBody, reqCtx.respBody)
 		}
 	}
 
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
+}
+
+func (h *Handler) handleResponseReadError(c *gin.Context, reqCtx *requestContext, startTime time.Time, err error) {
+	h.businessLogger.Error("failed to read response body", zap.Error(err))
+	reqCtx.meta.Error = err.Error()
+	reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
+	reqCtx.forceLog = true
+	h.updateConnectionStatus(reqCtx.connInfo, "error", reqCtx.meta.DurationMs)
+	h.saveLog(reqCtx)
+	c.Header("Content-Type", "application/json")
+	c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read response body"})
 }
 
 type toolBlockState struct {
@@ -1288,10 +1316,20 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 		return
 	}
 	defer resp.Body.Close()
+	responseReader, closeDecoders, err := decodedResponseBodyReader(resp)
+	if err != nil {
+		h.handleResponseReadError(c, reqCtx, startTime, err)
+		return
+	}
+	defer closeDecoders()
 
 	// 检查非 2xx 响应是否需要转换为上下文超限错误
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(responseReader)
+		if err != nil {
+			h.handleResponseReadError(c, reqCtx, startTime, err)
+			return
+		}
 		reqCtx.meta.Response = &ResponseMeta{
 			Status:  resp.StatusCode,
 			Headers: sanitizeHeaders(resp.Header),
@@ -1334,7 +1372,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 	// 检查成功响应是否也需要转换（基于请求大小阈值）
 	if handler := h.shouldTransformToContextError(reqCtx, resp.StatusCode, 0); handler != nil {
 		// 读取部分响应用于日志
-		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		preview, _ := io.ReadAll(io.LimitReader(responseReader, 1024))
 		reqCtx.meta.Response = &ResponseMeta{
 			Status:  resp.StatusCode,
 			Headers: sanitizeHeaders(resp.Header),
@@ -1354,7 +1392,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 	// 现在改为：流处理过程中通过 hasContentBlock + emptyMessageStartSeen 跟踪状态，
 	// 流结束后若仍未收到任何 content block 且首事件为空 message_start，则强制日志记录。
 	var originalBuffer bytes.Buffer
-	teeReader := io.TeeReader(resp.Body, &originalBuffer)
+	teeReader := io.TeeReader(responseReader, &originalBuffer)
 	reader := bufio.NewReader(teeReader)
 
 	// === 正常流式处理：设置响应头 ===
@@ -1423,14 +1461,14 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 	// 跟踪首个 message_start 是否为空内容（用于流末判定 forceLog / 错误转换降级）
 	emptyMessageStartSeen := false
 	firstEventProcessed := false
+	var streamErr error
 
 	// 实时处理上游事件流
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
-				h.businessLogger.Error("error reading stream", zap.Error(err))
-				reqCtx.meta.Error = err.Error()
+				streamErr = err
 			}
 			if accumulator != nil && accumulator.blockCount > 0 {
 				flushEvents := h.flushAccumulator(accumulator, &nextOutputIndex, reqCtx.tags, reqCtx)
@@ -1445,6 +1483,7 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 			eventType := strings.TrimPrefix(line, "event: ")
 			dataLine, err := reader.ReadString('\n')
 			if err != nil && err != io.EOF {
+				streamErr = err
 				break
 			}
 			dataLine = strings.TrimSuffix(dataLine, "\n")
@@ -1483,15 +1522,28 @@ func (h *Handler) handleStreamingResponse(c *gin.Context, proxyReq *http.Request
 	}
 	reqCtx.respBody = originalBuffer.Bytes()
 	reqCtx.meta.DurationMs = time.Since(startTime).Milliseconds()
+	if streamErr != nil {
+		// A decoder can reject a corrupt frame on its first read. Return an
+		// HTTP error while headers are still uncommitted instead of an empty 200.
+		if !c.Writer.Written() {
+			h.handleResponseReadError(c, reqCtx, startTime, streamErr)
+			return
+		}
+		h.businessLogger.Error("error reading stream", zap.Error(streamErr))
+		reqCtx.meta.Error = streamErr.Error()
+	}
 
 	// 设置强制记录标记（非200响应或200但body为空或流式响应无内容块）
 	// 若首事件 message_start 为空内容且最终也未产生 content block，强制记录用于后续分析
-	reqCtx.forceLog = h.shouldForceLog(resp.StatusCode, originalBuffer.Len(), !hasContentBlock || (emptyMessageStartSeen && !hasContentBlock))
+	reqCtx.forceLog = streamErr != nil || h.shouldForceLog(resp.StatusCode, originalBuffer.Len(), !hasContentBlock || (emptyMessageStartSeen && !hasContentBlock))
 
 	// Update memory store
 	if reqCtx.connInfo != nil && h.memoryStore != nil {
 		h.memoryStore.Update(reqCtx.connInfo.ID, func(c *memory.ConnectionInfo) {
 			c.Status = "completed"
+			if streamErr != nil {
+				c.Status = "error"
+			}
 			c.DurationMs = reqCtx.meta.DurationMs
 			c.EndTime = time.Now()
 			c.ResponseStatus = resp.StatusCode
@@ -2347,22 +2399,6 @@ func flattenHeaders(headers http.Header) map[string]string {
 		}
 	}
 	return result
-}
-
-func decompressIfNeeded(body []byte, headers http.Header) []byte {
-	if headers.Get("Content-Encoding") != "gzip" {
-		return body
-	}
-	reader, err := gzip.NewReader(bytes.NewReader(body))
-	if err != nil {
-		return body
-	}
-	defer reader.Close()
-	decompressed, err := io.ReadAll(reader)
-	if err != nil {
-		return body
-	}
-	return decompressed
 }
 
 // shouldForceLog 检查是否需要强制记录日志（不受 logging.enabled 影响）
