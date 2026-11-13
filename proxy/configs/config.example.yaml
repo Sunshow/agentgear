@@ -62,11 +62,12 @@ gateways:
   #   timeout: 600
   #   enabled: true
 
-  # Video protocol gateway: a New API channel bound to the doubao plugin calls
-  # {base}/doubao/api/v3/contents/generations/tasks, so the channel Base URL
-  # must be this server's root (no /doubao suffix).
+  # Video protocol gateway: `path` is the local mount point and the channel
+  # Base URL must include it, e.g. http://host:9000/orlucky. The doubao plugin
+  # then appends /doubao, so the upstream request is
+  # /orlucky/doubao/api/v3/contents/generations/tasks.
   # - name: orlucky-doubao
-  #   path: /doubao
+  #   path: /orlucky
   #   upstream: "https://router.orlucky.com/model/api"
   #   protocol: doubao
   #   timeout: 300
@@ -81,7 +82,7 @@ gateways:
   # Alibaba Bailian protocol slot. The config shape is ready; the ali adapter
   # still needs its mapper before it can be enabled.
   # - name: orlucky-ali
-  #   path: /ali
+  #   path: /orlucky-ali
   #   upstream: "https://router.orlucky.com/model/api"
   #   protocol: ali
   #   timeout: 300
@@ -107,9 +108,10 @@ video:
   # Default orlucky key for every video gateway. Empty forwards the inbound
   # Authorization bearer token. A gateway's video.api_key overrides this.
   api_key: ""
-  # Default externally reachable base URL for the local content proxy. Empty
-  # returns the upstream asset URL instead. A gateway's video.public_base_url
-  # overrides this.
+  # Default externally reachable ORIGIN for the local content proxy (for
+  # example http://agentgear:9000). The adapter appends gw.Path + /doubao +
+  # /api/v3/...; do not include the gateway path here. Empty returns the
+  # upstream asset URL instead. A gateway's video.public_base_url overrides it.
   public_base_url: ""
 
 # -----------------------------------------------------------------------------

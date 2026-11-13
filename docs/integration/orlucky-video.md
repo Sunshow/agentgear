@@ -183,10 +183,13 @@ Content-Type: application/json
 > 客户端应传 `metadata: { "content": [{ "type": "image_url", "image_url": { "url": "https://..." } }] }`
 > （或顶层 `images: ["https://..."]`）。文件形态会被 doubao 插件直接拒绝。
 
-> **渠道 Base URL 配置**：外层 new-api 渠道的 Base URL 必须填 AgentGear 的根地址
-> （如 `http://agentgear:9000`），**不要**带 `/doubao`；插件会自动追加 `/doubao`。
-> 若 AgentGear 部署在子路径，Base URL 填子路径（如 `http://host:9000/upstream`），
-> AgentGear 的 `prefix` 配 `/upstream/doubao`。
+> **渠道 Base URL 配置**：`gateways[].path` 是 AgentGear 的本地挂载点（例如 `/orlucky`）。
+> 外层 new-api 渠道的 Base URL 填 `{origin}{gw.Path}`（例如 `http://agentgear:9000/orlucky`），
+> **不要**自己再加 `/doubao`；doubao 插件会自动追加。
+> 最终请求是 `http://agentgear:9000/orlucky/doubao/api/v3/contents/generations/tasks`。
+>
+> 也就是说：`gw.Path` 是 AgentGear 的挂载点，`/doubao` 是 doubao 插件的协议前缀，
+> adapter 会在挂载点之后匹配 `/doubao/api/v3/...`（同时兼容不带 `/doubao` 的 vendor 形式）。
 
 响应（最小必需）：
 
@@ -501,17 +504,21 @@ default: return nil, fmt.Errorf("video protocol %q is not implemented", cfg.Prot
 ### 5.2 路由（由 gateway 的 path 决定）
 
 ```text
-{gw.Path}/api/v3/contents/generations/tasks             POST   create
-{gw.Path}/api/v3/contents/generations/tasks/{id}        GET    get
-{gw.Path}/api/v3/contents/generations/tasks/{id}/content  GET/HEAD  可选
+{gw.Path}/doubao/api/v3/contents/generations/tasks             POST   create
+{gw.Path}/doubao/api/v3/contents/generations/tasks/{id}        GET    get
+{gw.Path}/doubao/api/v3/contents/generations/tasks/{id}/content  GET/HEAD  可选
+
+{gw.Path}/api/v3/contents/generations/tasks/...                # vendor 形式，兼容
 ```
 
-`gw.Path` 来自 `gateways[].path`（必填），例如 `/doubao`。注册用
+`gw.Path` 来自 `gateways[].path`（必填），是**本地挂载点**，例如 `/orlucky`；
+`/doubao` 是 New API type-60 渠道下 doubao 插件追加的协议前缀。注册用
 `r.Any(gw.Path+"/*path", adapter.Handle)`，避免和 `/v1/*path` 这类透明网关冲突；
-handler 内部再匹配具体协议路径。
+handler 内部先剥掉可选的 `/doubao`，再匹配 `/api/v3/...`。
 
-> 外层 new-api 的 base URL 若带路径（如 `http://agentgear:9000/upstream`），
-> 则 gateway 的 `path` 配成 `/upstream/doubao` 即可。
+> 渠道 Base URL = `{origin}{gw.Path}`，例如 `http://agentgear:9000/orlucky`。
+> 若前面还有反向代理子路径，`gw.Path` 要把子路径算进去，例如
+> Base URL `http://host/upstream` → `gw.Path: /upstream/orlucky`。
 
 ### 5.3 配置：每个视频协议是一个 gateway
 
@@ -532,7 +539,7 @@ video:
 
 gateways:
   - name: orlucky-doubao
-    path: /doubao
+    path: /orlucky          # 本地挂载点；渠道 Base URL = http://host:9000/orlucky
     upstream: https://router.orlucky.com/model/api
     protocol: doubao
     timeout: 300
@@ -547,7 +554,7 @@ gateways:
 
   # 预留：Alibaba Bailian 协议。配置结构已就绪，ali adapter 实现后即可启用。
   - name: orlucky-ali
-    path: /ali
+    path: /orlucky-ali      # 渠道 Base URL = http://host:9000/orlucky-ali
     upstream: https://router.orlucky.com/model/api
     protocol: ali
     timeout: 300
@@ -618,9 +625,12 @@ type Task struct {
 当 `public_base_url` 非空时：
 
 ```text
-GET/HEAD {prefix}/api/v3/contents/generations/tasks/{id}/content
+GET/HEAD {gw.Path}/doubao/api/v3/contents/generations/tasks/{id}/content
   → 查库 → 取 AssetURL → 透传 Range/HEAD → 流式返回
 ```
+
+`public_base_url` 填**origin**（如 `http://agentgear:9000`），adapter 会拼上
+`gw.Path + /doubao + /api/v3/...` 生成最终内容 URL。
 
 外层 new-api 以 `credentialless` 方式访问，因此该端点不能要求鉴权，
 依赖 `task_` 随机 ID 的不可猜测性；也可以额外加 IP 白名单（部署层）。
@@ -702,7 +712,7 @@ video:
 
 gateways:
   - name: orlucky-doubao
-    path: /doubao
+    path: /orlucky          # 本地挂载点；渠道 Base URL = http://host:9000/orlucky
     upstream: https://router.orlucky.com/model/api
     protocol: doubao
     timeout: 300
@@ -719,7 +729,7 @@ gateways:
 
 1. 在 `gateways` 增加一个 `protocol: ali` 的条目，配 `path` / `upstream` / `video.models`；
 2. 在 `proxy/internal/video` 实现 `ali` 的协议 handler（路由、请求映射、响应呈现），
-   并在 `NewHandler` 的 protocol 分支注册。
+   并在 `NewAdapter` 的 protocol 分支注册。
 
 存储、超时、缓存、鉴权透传、内容代理都是协议无关的，不需要重复配置。
 

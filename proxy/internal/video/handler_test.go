@@ -411,3 +411,42 @@ func TestUnsupportedProtocolRejected(t *testing.T) {
 		t.Fatalf("expected unsupported protocol error, got %v", err)
 	}
 }
+
+func TestGatewayMountPath(t *testing.T) {
+	fake := &fakeUpstream{state: "PENDING"}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	_, engine := newTestHandler(t, server.URL, func(cfg *Config) {
+		cfg.Prefix = "/orlucky"
+		cfg.PublicBaseURL = "http://agentgear:9000"
+	})
+
+	recorder := doRequest(engine, http.MethodPost, "/orlucky/doubao/api/v3/contents/generations/tasks",
+		`{"model":"doubao-seedance-2-0-mini-260615","content":[{"type":"text","text":"a cat"}],"duration":5}`,
+		map[string]string{"Authorization": "Bearer sk-test"})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("create response: %v %s", err, recorder.Body.String())
+	}
+
+	fake.mu.Lock()
+	fake.state = "SUCCEEDED"
+	fake.assetURL = "https://cdn.example.com/out.mp4"
+	fake.mu.Unlock()
+
+	recorder = doRequest(engine, http.MethodGet, "/orlucky/doubao/api/v3/contents/generations/tasks/"+created.ID, "",
+		map[string]string{"Authorization": "Bearer sk-test"})
+	var response arkTaskResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode query response: %v", err)
+	}
+	want := "http://agentgear:9000/orlucky/doubao/api/v3/contents/generations/tasks/" + created.ID + "/content"
+	if response.Content == nil || response.Content.VideoURL != want {
+		t.Fatalf("content url = %#v, want %s", response.Content, want)
+	}
+}

@@ -20,6 +20,9 @@ import (
 )
 
 const (
+	// doubaoRoot is the New API type-60 copy prefix the doubao plugin adds to
+	// its native routes. It follows the gateway's local mount path.
+	doubaoRoot     = "/doubao"
 	tasksPath      = "/api/v3/contents/generations/tasks"
 	maxRequestBody = 8 << 20
 )
@@ -160,10 +163,7 @@ func (h *Handler) Register(engine *gin.Engine) {
 }
 
 func (h *Handler) Handle(c *gin.Context) {
-	path := c.Param("path")
-	if path == "" {
-		path = "/"
-	}
+	path := protocolPath(c.Param("path"))
 	method := c.Request.Method
 	switch {
 	case method == http.MethodPost && path == tasksPath:
@@ -190,6 +190,23 @@ func (h *Handler) Handle(c *gin.Context) {
 	default:
 		h.writeNotFound(c)
 	}
+}
+
+// protocolPath removes the protocol's New API copy prefix from the path below
+// the gateway mount. A gateway mounted at /orlucky receives
+// /orlucky/doubao/api/v3/... from a type-60 channel; a vendor-style call
+// receives /orlucky/api/v3/.... Both reach the same protocol handler.
+func protocolPath(path string) string {
+	if path == "" || path == "/" {
+		return "/"
+	}
+	if path == doubaoRoot {
+		return "/"
+	}
+	if rest, found := strings.CutPrefix(path, doubaoRoot+"/"); found {
+		return "/" + rest
+	}
+	return path
 }
 
 func decodeParam(value string) string {
@@ -512,7 +529,7 @@ func copyAssetHeaders(destination, source http.Header) {
 }
 
 func (h *Handler) publicContentURL(publicID string) string {
-	return strings.TrimRight(h.cfg.PublicBaseURL, "/") + h.cfg.Prefix + tasksPath + "/" + url.PathEscape(publicID) + "/content"
+	return strings.TrimRight(h.cfg.PublicBaseURL, "/") + h.cfg.Prefix + doubaoRoot + tasksPath + "/" + url.PathEscape(publicID) + "/content"
 }
 
 func (h *Handler) upstreamKey(c *gin.Context) (string, bool) {
