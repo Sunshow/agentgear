@@ -6,6 +6,13 @@ export interface GatewayConfig {
   path: string
   upstream: string
   type: string
+  /** Non-empty turns the gateway into a protocol adapter (doubao, ali, ...). */
+  protocol?: string
+  video?: {
+    api_key?: string
+    public_base_url?: string
+    models?: Record<string, string>
+  }
   timeout: number
   enabled: boolean
 }

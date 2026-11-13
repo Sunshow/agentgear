@@ -113,6 +113,12 @@ export function GatewayList() {
                     <span className="text-muted-foreground">Upstream:</span>
                     <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{gw.upstream}</code>
                   </div>
+                  {gw.protocol && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Protocol:</span>
+                      <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{gw.protocol}</code>
+                    </div>
+                  )}
                   {gw.type && (
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground">Type:</span>

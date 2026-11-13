@@ -20,6 +20,9 @@ server:
 # -----------------------------------------------------------------------------
 # Define upstream API gateways. Each gateway maps a local path to an upstream URL.
 # Multiple gateways can be configured for different upstream services.
+# A gateway with `protocol` set is a protocol adapter (e.g. doubao, ali) instead
+# of a transparent proxy; its `path` is the local prefix and `upstream` is the
+# protocol's upstream root. See the Video protocol adapters section below.
 gateways:
   # Direct Anthropic API gateway
   - name: "anthropic"
@@ -59,7 +62,58 @@ gateways:
   #   timeout: 600
   #   enabled: true
 
+  # Video protocol gateway: a New API channel bound to the doubao plugin calls
+  # {base}/doubao/api/v3/contents/generations/tasks, so the channel Base URL
+  # must be this server's root (no /doubao suffix).
+  # - name: orlucky-doubao
+  #   path: /doubao
+  #   upstream: "https://router.orlucky.com/model/api"
+  #   protocol: doubao
+  #   timeout: 300
+  #   enabled: true
+  #   video:
+  #     models:
+  #       doubao-seedance-2-0-260128: "seedance-2.0"
+  #       doubao-seedance-2-0-fast-260128: "seedance-fast"
+  #       doubao-seedance-2-0-mini-260615: "seedance-mini"
+  #       doubao-seedance-2-5-260628: "seedance-2.5"
+
+  # Alibaba Bailian protocol slot. The config shape is ready; the ali adapter
+  # still needs its mapper before it can be enabled.
+  # - name: orlucky-ali
+  #   path: /ali
+  #   upstream: "https://router.orlucky.com/model/api"
+  #   protocol: ali
+  #   timeout: 300
+  #   enabled: true
+  #   video:
+  #     models:
+  #       wan3.0-video: "wan-3.0"
+
 # -----------------------------------------------------------------------------
+# Video protocol adapters (shared settings)
+# -----------------------------------------------------------------------------
+# A gateway with `protocol` set is a protocol adapter instead of a transparent
+# proxy. Each adapter gets its own path/upstream/protocol; all adapters share
+# these settings.
+#
+# Supported protocols: doubao (implemented); ali (reserved, not implemented).
+video:
+  store_path: "./data/video_tasks.db"
+  task_ttl_hours: 72
+  create_timeout_seconds: 300
+  query_timeout_seconds: 30
+  cache_ttl_ms: 1500
+  # Default orlucky key for every video gateway. Empty forwards the inbound
+  # Authorization bearer token. A gateway's video.api_key overrides this.
+  api_key: ""
+  # Default externally reachable base URL for the local content proxy. Empty
+  # returns the upstream asset URL instead. A gateway's video.public_base_url
+  # overrides this.
+  public_base_url: ""
+
+# -----------------------------------------------------------------------------
+# Logging Configuration# -----------------------------------------------------------------------------
 # Logging Configuration
 # -----------------------------------------------------------------------------
 # Request/response logging to files for debugging and analysis.

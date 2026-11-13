@@ -15,6 +15,7 @@ import (
 	"github.com/sunshow/agentgear/proxy/internal/proxy"
 	"github.com/sunshow/agentgear/proxy/internal/tagging"
 	"github.com/sunshow/agentgear/proxy/internal/transformer"
+	"github.com/sunshow/agentgear/proxy/internal/video"
 )
 
 var configPath string
@@ -131,13 +132,80 @@ func runServe(cmd *cobra.Command, args []string) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	// Register gateway routes
+	// Video protocol gateways share one task store. bbolt allows a single
+	// process-wide open of the file, so the store is created once and passed
+	// to every adapter.
+	var videoStore *video.Store
+	var videoAdapters []video.Adapter
+	defer func() {
+		for _, adapter := range videoAdapters {
+			if err := adapter.Close(); err != nil {
+				businessLogger.Sugar().Errorf("video adapter close error: %v", err)
+			}
+		}
+		if videoStore != nil {
+			if err := videoStore.Close(); err != nil {
+				businessLogger.Sugar().Errorf("video store close error: %v", err)
+			}
+		}
+	}()
+
+	// Register gateway routes. A gateway with protocol set is a protocol
+	// adapter (doubao, ali, ...); otherwise it stays a transparent proxy.
 	enabledGateways := 0
 	for _, gw := range cfg.Gateways {
 		if !gw.Enabled {
 			continue
 		}
 		enabledGateways++
+
+		if gw.Protocol != "" {
+			if videoStore == nil {
+				opened, err := video.OpenStore(cfg.Video.StorePath, time.Duration(cfg.Video.TaskTTLHours)*time.Hour)
+				if err != nil {
+					log.Fatalf("failed to open video task store: %v", err)
+				}
+				videoStore = opened
+			}
+			apiKey := cfg.Video.APIKey
+			publicBaseURL := cfg.Video.PublicBaseURL
+			var models map[string]string
+			if gw.Video != nil {
+				if gw.Video.APIKey != "" {
+					apiKey = gw.Video.APIKey
+				}
+				if gw.Video.PublicBaseURL != "" {
+					publicBaseURL = gw.Video.PublicBaseURL
+				}
+				models = gw.Video.Models
+			}
+			createTimeout := time.Duration(cfg.Video.CreateTimeoutSeconds) * time.Second
+			if gw.Timeout > 0 {
+				createTimeout = time.Duration(gw.Timeout) * time.Second
+			}
+			videoAdapter, err := video.NewAdapter(video.Config{
+				Protocol:      gw.Protocol,
+				Prefix:        gw.Path,
+				Upstream:      gw.Upstream,
+				APIKey:        apiKey,
+				PublicBaseURL: publicBaseURL,
+				Store:         videoStore,
+				StorePath:     cfg.Video.StorePath,
+				TaskTTL:       time.Duration(cfg.Video.TaskTTLHours) * time.Hour,
+				CreateTimeout: createTimeout,
+				QueryTimeout:  time.Duration(cfg.Video.QueryTimeoutSeconds) * time.Second,
+				CacheTTL:      time.Duration(cfg.Video.CacheTTLMs) * time.Millisecond,
+				Models:        models,
+			}, businessLogger.Logger)
+			if err != nil {
+				log.Fatalf("failed to start video gateway %s: %v", gw.Name, err)
+			}
+			videoAdapter.Register(r)
+			videoAdapters = append(videoAdapters, videoAdapter)
+			businessLogger.Sugar().Infof("Video gateway '%s' registered: %s/* protocol=%s -> %s",
+				gw.Name, gw.Path, gw.Protocol, gw.Upstream)
+			continue
+		}
 
 		proxyHandler := proxy.NewHandler(proxy.Config{
 			GatewayName:         gw.Name,

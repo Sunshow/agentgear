@@ -57,6 +57,7 @@ agentgear/
 | 部署与构建 | `docs/integration/deployment.md` |
 | Thinking Preserve（保留 thinking blocks） | `docs/core-features/thinking-preserve.md` |
 | 上下文压缩 | `docs/integration/compression.md` |
+| 视频协议适配（doubao/Ark → orlucky） | `docs/integration/orlucky-video.md` |
 | GUI 对话框开发 | `docs/gui/dialogs.md` |
 | GUI 组件使用 | `docs/gui/components.md` |
 

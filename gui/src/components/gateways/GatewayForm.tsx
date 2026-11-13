@@ -111,6 +111,13 @@ export function GatewayForm({ open, onClose, gateway }: GatewayFormProps) {
             />
 
             <Input
+              label="Protocol"
+              value={form.protocol || ''}
+              onChange={(e) => setForm({ ...form, protocol: e.target.value })}
+              placeholder="doubao / ali (empty = transparent proxy)"
+            />
+
+            <Input
               label="Timeout (seconds)"
               type="number"
               value={form.timeout}
