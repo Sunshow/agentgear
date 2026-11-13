@@ -21,13 +21,20 @@ type orluckyError struct {
 	Code       string
 	Message    string
 	TraceID    string
+	// Body is a truncated upstream payload kept only for logs on decode
+	// failures; it is never returned to the client.
+	Body string
 }
 
 func (e *orluckyError) Error() string {
-	if e.Message != "" {
-		return e.Message
+	message := e.Message
+	if message == "" {
+		message = fmt.Sprintf("orlucky returned HTTP %d", e.StatusCode)
 	}
-	return fmt.Sprintf("orlucky returned HTTP %d", e.StatusCode)
+	if e.Body != "" {
+		message += " (body: " + e.Body + ")"
+	}
+	return message
 }
 
 type orluckyClient struct {
@@ -131,14 +138,58 @@ func decodeTaskResponse(statusCode int, raw []byte) (*orluckyTask, error) {
 	if len(envelope.Data) == 0 {
 		return nil, &orluckyError{StatusCode: statusCode, Message: "orlucky returned an empty task"}
 	}
-	var task orluckyTask
-	if err := json.Unmarshal(envelope.Data, &task); err != nil {
-		return nil, &orluckyError{StatusCode: statusCode, Message: "orlucky returned an invalid task"}
+	task, err := parseOrluckyTask(envelope.Data)
+	if err != nil {
+		return nil, &orluckyError{
+			StatusCode: statusCode,
+			Message:    "orlucky returned an invalid task: " + err.Error(),
+			Body:       truncateBody(string(envelope.Data), 1024),
+		}
 	}
-	if strings.TrimSpace(task.TaskID) == "" {
-		return nil, &orluckyError{StatusCode: statusCode, Message: "orlucky returned a task without an id"}
+	return task, nil
+}
+
+// parseOrluckyTask reads the task fields by name instead of relying on struct
+// tags, so a numeric id or an unexpected extra field cannot fail the whole
+// decode. The nested data payload stays raw and is parsed tolerantly later.
+func parseOrluckyTask(raw []byte) (*orluckyTask, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("task is not a JSON object")
 	}
-	return &task, nil
+	task := &orluckyTask{
+		TaskID:   rawString(fields["taskId"]),
+		State:    rawString(fields["state"]),
+		Category: rawString(fields["category"]),
+		Data:     fields["data"],
+		Error:    fields["error"],
+	}
+	if task.TaskID == "" {
+		return nil, fmt.Errorf("taskId is missing")
+	}
+	return task, nil
+}
+
+func rawString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return strings.TrimSpace(text)
+	}
+	var number json.Number
+	if json.Unmarshal(raw, &number) == nil {
+		return number.String()
+	}
+	return ""
+}
+
+func truncateBody(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
 }
 
 // openAsset requests the generated media. The caller owns the response body.

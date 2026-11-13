@@ -27,6 +27,7 @@ type fakeUpstream struct {
 	state         string
 	failure       string
 	assetURL      string
+	stringAssets  bool
 }
 
 func (f *fakeUpstream) handler() http.Handler {
@@ -67,12 +68,18 @@ func (f *fakeUpstream) handler() http.Handler {
 		state := f.state
 		failure := f.failure
 		assetURL := f.assetURL
+		stringAssets := f.stringAssets
 		f.queryCalls++
 		f.mu.Unlock()
 		data := map[string]any{"taskId": "up1", "state": state}
 		if assetURL != "" {
-			data["data"] = map[string]any{
-				"assets": []map[string]any{{"type": "VIDEO", "url": assetURL}},
+			if stringAssets {
+				// orlucky's live video task API returns bare URL strings.
+				data["data"] = map[string]any{"text": "", "assets": []string{assetURL}}
+			} else {
+				data["data"] = map[string]any{
+					"assets": []map[string]any{{"type": "VIDEO", "url": assetURL}},
+				}
 			}
 		}
 		if failure != "" {
@@ -448,5 +455,31 @@ func TestGatewayMountPath(t *testing.T) {
 	want := "http://agentgear:9000/orlucky/doubao/api/v3/contents/generations/tasks/" + created.ID + "/content"
 	if response.Content == nil || response.Content.VideoURL != want {
 		t.Fatalf("content url = %#v, want %s", response.Content, want)
+	}
+}
+
+func TestQueryStringAssets(t *testing.T) {
+	fake := &fakeUpstream{state: "PENDING", stringAssets: true}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	_, engine := newTestHandler(t, server.URL, nil)
+
+	id := createTask(t, engine)
+	fake.mu.Lock()
+	fake.state = "SUCCEEDED"
+	fake.assetURL = "https://cdn.example.com/out.mp4?Expires=1&Signature=a%2Bb"
+	fake.mu.Unlock()
+
+	recorder := doRequest(engine, http.MethodGet, "/doubao/api/v3/contents/generations/tasks/"+id, "",
+		map[string]string{"Authorization": "Bearer sk-test"})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response arkTaskResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Status != "succeeded" || response.Content == nil || response.Content.VideoURL != fake.assetURL {
+		t.Fatalf("unexpected response: %#v", response)
 	}
 }

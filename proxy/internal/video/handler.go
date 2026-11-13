@@ -381,9 +381,10 @@ func (h *Handler) refresh(parent context.Context, task *Task, apiKey string) (*a
 		status, terminal, success = "running", false, false
 	}
 	message := taskErrorMessage(upstream)
+	data := upstream.decodedData()
 	var usage json.RawMessage
-	if upstream.Data != nil && len(upstream.Data.Usage) > 0 {
-		usage = upstream.Data.Usage
+	if len(data.Usage) > 0 && string(data.Usage) != "null" {
+		usage = data.Usage
 	}
 	now := time.Now().Unix()
 

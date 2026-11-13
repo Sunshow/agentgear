@@ -1,6 +1,7 @@
 package video
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -226,15 +227,77 @@ func TestMapOrluckyState(t *testing.T) {
 }
 
 func TestVideoAssetURL(t *testing.T) {
-	task := &orluckyTask{Data: &orluckyTaskData{Assets: []orluckyAsset{
-		{Type: "IMAGE", URL: "https://example.com/frame.png"},
-		{Type: "VIDEO", DownloadURL: "https://example.com/video.mp4"},
-	}}}
-	if url := videoAssetURL(task); url != "https://example.com/video.mp4" {
-		t.Fatalf("unexpected asset url: %s", url)
+	cases := []struct {
+		name string
+		data string
+		want string
+	}{
+		{
+			name: "object assets",
+			data: `{"assets":[
+				{"type":"IMAGE","url":"https://example.com/frame.png"},
+				{"type":"VIDEO","downloadUrl":"https://example.com/video.mp4"}
+			]}`,
+			want: "https://example.com/video.mp4",
+		},
+		{
+			name: "bare string assets",
+			data: `{"text":"","assets":[
+				"https://example.com/frame.png",
+				"https://example.com/video.mp4?Expires=1"
+			]}`,
+			want: "https://example.com/video.mp4?Expires=1",
+		},
+		{
+			name: "bare assets array",
+			data: `[{"type":"VIDEO","url":"https://example.com/a.mp4"}]`,
+			want: "https://example.com/a.mp4",
+		},
+		{
+			name: "malformed asset skipped",
+			data: `{"assets":[{"url":123},{"type":"VIDEO","url":"https://example.com/b.mp4"}]}`,
+			want: "https://example.com/b.mp4",
+		},
+		{
+			name: "null data",
+			data: `null`,
+			want: "",
+		},
+	}
+	for _, testCase := range cases {
+		task := &orluckyTask{Category: "VIDEO", Data: json.RawMessage(testCase.data)}
+		if url := videoAssetURL(task); url != testCase.want {
+			t.Fatalf("%s: asset url = %q, want %q", testCase.name, url, testCase.want)
+		}
 	}
 	if url := videoAssetURL(nil); url != "" {
 		t.Fatalf("unexpected asset url for nil task: %s", url)
+	}
+}
+
+func TestParseOrluckyTask(t *testing.T) {
+	raw := []byte(`{
+		"success": true,
+		"traceId": "outer",
+		"taskId": "bce5981f-4c21-499b-906e-7aa0a4903d09",
+		"state": "SUCCEEDED",
+		"category": "VIDEO",
+		"data": {
+			"text": "",
+			"assets": ["https://example.com/out.mp4?Expires=1"]
+		},
+		"attempts": 1,
+		"error": null
+	}`)
+	task, err := parseOrluckyTask(raw)
+	if err != nil {
+		t.Fatalf("parseOrluckyTask: %v", err)
+	}
+	if task.TaskID != "bce5981f-4c21-499b-906e-7aa0a4903d09" || task.State != "SUCCEEDED" || task.Category != "VIDEO" {
+		t.Fatalf("unexpected task: %#v", task)
+	}
+	if url := videoAssetURL(task); url != "https://example.com/out.mp4?Expires=1" {
+		t.Fatalf("asset url = %q", url)
 	}
 }
 

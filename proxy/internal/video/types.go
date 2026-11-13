@@ -1,6 +1,7 @@
 package video
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -75,17 +76,90 @@ type orluckyMedia struct {
 }
 
 type orluckyTask struct {
-	TaskID   string           `json:"taskId"`
-	State    string           `json:"state"`
-	Category string           `json:"category"`
-	Data     *orluckyTaskData `json:"data"`
-	Error    json.RawMessage  `json:"error"`
+	TaskID   string
+	State    string
+	Category string
+	Data     json.RawMessage
+	Error    json.RawMessage
 }
 
 type orluckyTaskData struct {
-	Text   string          `json:"text"`
-	Assets []orluckyAsset  `json:"assets"`
-	Usage  json.RawMessage `json:"usage,omitempty"`
+	Text   string
+	Assets []orluckyAsset
+	Usage  json.RawMessage
+}
+
+// decodedData tolerates the shapes orlucky has used for data: an object with
+// text/assets/usage, a bare array of assets, or null. Individual malformed
+// assets are skipped instead of failing the whole task, so a status-only
+// response still lets the adapter answer the query.
+func (t *orluckyTask) decodedData() orluckyTaskData {
+	var result orluckyTaskData
+	if t == nil {
+		return result
+	}
+	raw := bytes.TrimSpace(t.Data)
+	if len(raw) == 0 || string(raw) == "null" {
+		return result
+	}
+	var object struct {
+		Text   string            `json:"text"`
+		Assets []json.RawMessage `json:"assets"`
+		Usage  json.RawMessage   `json:"usage"`
+	}
+	if err := json.Unmarshal(raw, &object); err == nil {
+		result.Text = object.Text
+		result.Usage = object.Usage
+		result.Assets = t.decodeAssets(object.Assets)
+		return result
+	}
+	var assets []json.RawMessage
+	if err := json.Unmarshal(raw, &assets); err == nil {
+		result.Assets = t.decodeAssets(assets)
+	}
+	return result
+}
+
+// decodeAssets accepts both shapes orlucky has returned: objects with
+// type/url fields, and bare URL strings (the video task API currently uses
+// the latter). A string's kind is inferred from its extension, falling back
+// to the task category.
+func (t *orluckyTask) decodeAssets(rawAssets []json.RawMessage) []orluckyAsset {
+	assets := make([]orluckyAsset, 0, len(rawAssets))
+	for _, raw := range rawAssets {
+		var text string
+		if json.Unmarshal(raw, &text) == nil {
+			text = strings.TrimSpace(text)
+			if text != "" {
+				assets = append(assets, orluckyAsset{Type: t.assetType(text), URL: text})
+			}
+			continue
+		}
+		var asset orluckyAsset
+		if json.Unmarshal(raw, &asset) == nil {
+			assets = append(assets, asset)
+		}
+	}
+	return assets
+}
+
+func (t *orluckyTask) assetType(url string) string {
+	lower := strings.ToLower(url)
+	switch {
+	case strings.Contains(lower, ".mp4"), strings.Contains(lower, ".webm"),
+		strings.Contains(lower, ".mov"), strings.Contains(lower, ".m3u8"):
+		return "VIDEO"
+	case strings.Contains(lower, ".png"), strings.Contains(lower, ".jpg"),
+		strings.Contains(lower, ".jpeg"), strings.Contains(lower, ".webp"), strings.Contains(lower, ".gif"):
+		return "IMAGE"
+	}
+	if strings.EqualFold(strings.TrimSpace(t.Category), "VIDEO") {
+		return "VIDEO"
+	}
+	if strings.EqualFold(strings.TrimSpace(t.Category), "IMAGE") {
+		return "IMAGE"
+	}
+	return ""
 }
 
 type orluckyAsset struct {
@@ -130,10 +204,10 @@ func taskErrorMessage(task *orluckyTask) string {
 // videoAssetURL returns the first video asset URL, preferring url over
 // downloadUrl. Last-frame artifacts are images and are never selected.
 func videoAssetURL(task *orluckyTask) string {
-	if task == nil || task.Data == nil {
+	if task == nil {
 		return ""
 	}
-	for _, asset := range task.Data.Assets {
+	for _, asset := range task.decodedData().Assets {
 		kind := strings.ToLower(strings.TrimSpace(asset.Type + " " + asset.Kind))
 		if !strings.Contains(kind, "video") {
 			continue
